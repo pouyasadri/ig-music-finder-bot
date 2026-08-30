@@ -23,9 +23,11 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
+    python3-pip \
     curl \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir --break-system-packages shazamio
 
 # Copy ACRCloud shared library
 COPY --from=builder /usr/lib/libacrcloud_extr_tool.so /usr/lib/libacrcloud_extr_tool.so
@@ -37,5 +39,6 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 
 WORKDIR /app
 COPY --from=builder /app/bin/bot /app/bot
+COPY scripts/ /app/scripts/
 
 CMD ["/app/bot"]

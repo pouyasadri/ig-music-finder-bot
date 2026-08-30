@@ -10,6 +10,8 @@ services:
       - ACR_HOST=identify-eu-west-1.acrcloud.com
       - ACR_KEY=6bf9b63330e67f489249fbccb99f5c1f
       - ACR_SECRET=FKrI2ZLgpANGVRdceIsiUtbJ2A7AcUDZN2iiqGFJ
+      - AUDD_API_TOKEN=c92e81e99be20de92aa05be9ee45d6b5
+      - SHAZAM_SCRIPT_PATH=/app/scripts/shazam_recognize.py
       - COOKIES_PATH=/app/cookies.txt
     volumes:
       - ./cookies.txt:/app/cookies.txt
