@@ -2,9 +2,11 @@ package extractor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"telegram-audio-bot/internal/usecase"
@@ -33,15 +35,18 @@ func (e *YtDlpExtractor) ExtractReel(ctx context.Context, targetDir, url string)
 		"--audio-format", "mp3",
 		"--no-playlist",
 		"-o", rawPath,
-		url,
-	}
-	if _, err := os.Stat(e.cookiesPath); err == nil {
-		args = append([]string{"--cookies", e.cookiesPath}, args...)
 	}
 
+	// Only attach cookies if the file exists and is not empty
+	if fi, err := os.Stat(e.cookiesPath); err == nil && fi.Size() > 0 {
+		args = append(args, "--cookies", e.cookiesPath)
+	}
+
+	args = append(args, url)
+
 	cmd := exec.CommandContext(extractCtx, "yt-dlp", args...)
-	if err := cmd.Run(); err != nil {
-		return "", "", err
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("yt-dlp extract error: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	// Create 10s audio snippet using fast seek for ACRCloud fingerprinting

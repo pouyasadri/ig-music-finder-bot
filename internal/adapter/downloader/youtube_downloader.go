@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"telegram-audio-bot/internal/usecase"
@@ -38,8 +39,8 @@ func (d *YouTubeDownloader) Download(ctx context.Context, targetDir, query strin
 		searchQuery,
 	)
 
-	if err := cmd.Run(); err != nil {
-		return "", err
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("yt-dlp download error: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {

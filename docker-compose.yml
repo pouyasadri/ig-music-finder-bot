@@ -6,10 +6,10 @@ services:
     container_name: ig-audio-bot
     restart: unless-stopped
     environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - ACR_HOST=${ACR_HOST}
-      - ACR_KEY=${ACR_KEY}
-      - ACR_SECRET=${ACR_SECRET}
+      - TELEGRAM_BOT_TOKEN=8928463084:AAEgT3r_WlNyqbTW7njByhqvZq1mdGEta0U
+      - ACR_HOST=identify-eu-west-1.acrcloud.com
+      - ACR_KEY=6bf9b63330e67f489249fbccb99f5c1f
+      - ACR_SECRET=FKrI2ZLgpANGVRdceIsiUtbJ2A7AcUDZN2iiqGFJ
       - COOKIES_PATH=/app/cookies.txt
     volumes:
       - ./cookies.txt:/app/cookies.txt:ro
