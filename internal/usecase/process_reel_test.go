@@ -60,7 +60,7 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, downloader)
+		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
 		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
 
 		if err != nil {
@@ -84,7 +84,7 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		downloader := &mockDownloader{}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, downloader)
+		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
 		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
 
 		if err != nil {
@@ -112,7 +112,7 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, downloader)
+		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
 		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
 
 		if err != nil {
@@ -120,6 +120,45 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		if res.IsFullTrack || res.FilePath != "/tmp/raw.mp3" {
 			t.Errorf("expected raw fallback audio, got: %+v", res)
+		}
+	})
+
+	t.Run("success: direct YouTube URL routing when available", func(t *testing.T) {
+		var downloadedTarget string
+		extractor := &mockExtractor{
+			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
+				return "/tmp/raw.mp3", "/tmp/snippet.mp3", nil
+			},
+		}
+		recognizer := &mockRecognizer{
+			IdentifyFunc: func(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
+				return &domain.TrackMetadata{
+					Title:      "Song Direct",
+					Artist:     "Artist Direct",
+					IsMatched:  true,
+					Duration:   180,
+					YouTubeURL: "https://www.youtube.com/watch?v=direct123",
+				}, nil
+			},
+		}
+		downloader := &mockDownloader{
+			DownloadFunc: func(ctx context.Context, dir, query string) (string, string, int, error) {
+				downloadedTarget = query
+				return "/tmp/full.mp3", "/tmp/cover.jpg", 0, nil // 0 duration to test fallback to meta.Duration
+			},
+		}
+
+		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
+
+		if err != nil {
+			t.Fatalf("expected nil error, got: %v", err)
+		}
+		if downloadedTarget != "https://www.youtube.com/watch?v=direct123" {
+			t.Errorf("expected direct YouTube URL to be passed to downloader, got: %s", downloadedTarget)
+		}
+		if res.Duration != 180 {
+			t.Errorf("expected fallback to meta.Duration (180), got: %d", res.Duration)
 		}
 	})
 
@@ -132,7 +171,7 @@ func TestProcessReelAudio(t *testing.T) {
 		recognizer := &mockRecognizer{}
 		downloader := &mockDownloader{}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, downloader)
+		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
 		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
 
 		if err == nil {

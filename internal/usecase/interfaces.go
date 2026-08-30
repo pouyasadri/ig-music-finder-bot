@@ -13,6 +13,10 @@ type MusicRecognizer interface {
 	Identify(ctx context.Context, snippetPath string) (*domain.TrackMetadata, error)
 }
 
+type URLMusicRecognizer interface {
+	IdentifyByURL(ctx context.Context, url string) (*domain.TrackMetadata, error)
+}
+
 type MusicDownloader interface {
 	Download(ctx context.Context, targetDir, query string) (filePath, thumbnailPath string, duration int, err error)
 }
