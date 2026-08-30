@@ -12,6 +12,6 @@ services:
       - ACR_SECRET=FKrI2ZLgpANGVRdceIsiUtbJ2A7AcUDZN2iiqGFJ
       - COOKIES_PATH=/app/cookies.txt
     volumes:
-      - ./cookies.txt:/app/cookies.txt:ro
+      - ./cookies.txt:/app/cookies.txt
     tmpfs:
       - /tmp:size=1G,mode=1777

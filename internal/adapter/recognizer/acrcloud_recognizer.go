@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"telegram-audio-bot/internal/domain"
 	"telegram-audio-bot/internal/usecase"
 
@@ -22,10 +23,21 @@ type acrResponse struct {
 	} `json:"status"`
 	Metadata struct {
 		Music []struct {
-			Title   string `json:"title"`
-			Artists []struct {
+			Title    string `json:"title"`
+			DurationMs int  `json:"duration_ms"`
+			Artists  []struct {
 				Name string `json:"name"`
 			} `json:"artists"`
+			ExternalMetadata struct {
+				Spotify struct {
+					Track struct {
+						ID string `json:"id"`
+					} `json:"track"`
+				} `json:"spotify"`
+				YouTube struct {
+					Vid string `json:"vid"`
+				} `json:"youtube"`
+			} `json:"external_metadata"`
 		} `json:"music"`
 	} `json:"metadata"`
 }
@@ -58,9 +70,22 @@ func (a *ACRCloudRecognizer) Identify(ctx context.Context, snippetPath string) (
 		artist = music.Artists[0].Name
 	}
 
+	durationSec := music.DurationMs / 1000
+
+	var spotifyURL, youtubeURL string
+	if music.ExternalMetadata.Spotify.Track.ID != "" {
+		spotifyURL = fmt.Sprintf("https://open.spotify.com/track/%s", music.ExternalMetadata.Spotify.Track.ID)
+	}
+	if music.ExternalMetadata.YouTube.Vid != "" {
+		youtubeURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", music.ExternalMetadata.YouTube.Vid)
+	}
+
 	return &domain.TrackMetadata{
-		Title:     music.Title,
-		Artist:    artist,
-		IsMatched: true,
+		Title:      music.Title,
+		Artist:     artist,
+		IsMatched:  true,
+		Duration:   durationSec,
+		SpotifyURL: spotifyURL,
+		YouTubeURL: youtubeURL,
 	}, nil
 }

@@ -10,13 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"telegram-audio-bot/internal/domain"
 	"telegram-audio-bot/internal/usecase"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
-var igURLRegex = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
+var (
+	igURLRegex      = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
+	sanitizeFilename = regexp.MustCompile(`[<>:"/\\|?*]`)
+)
 
 type BotHandler struct {
 	token       string
@@ -83,10 +87,10 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		"url", reelURL,
 	)
 
-	// Send initial acknowledgment in casual Farsi
+	// Send initial acknowledgment message in casual Farsi
 	statusMsg, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
-		Text:   "دریافت شد! در حال دانلود و بررسی موزیک ریلز... ⏳",
+		Text:   "📥 دریافت شد! در حال استخراج و بررسی صدای ریلز... ⏳",
 	})
 
 	go func() {
@@ -144,22 +148,58 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		}
 		defer f.Close()
 
-		// Native casual Farsi captions
-		var caption string
-		if payload.IsFullTrack {
-			caption = fmt.Sprintf("✨ نسخه کامل و باکیفیت آهنگ پیدا شد!\n\n🎵 نام اثر: %s\n👤 خواننده: %s", payload.Title, payload.Performer)
-		} else {
-			caption = "🎶 صدای اصلی خود ریلز اینستاگرام\n(نسخه استودیویی پیدا نشد یا صدای اختصاصی است)"
+		// Generate clean and organized filename for saving (e.g. "Artist - Title.mp3")
+		cleanTitle := sanitizeFilename.ReplaceAllString(payload.Title, "")
+		cleanArtist := sanitizeFilename.ReplaceAllString(payload.Performer, "")
+		if cleanTitle == "" {
+			cleanTitle = "Audio"
+		}
+		cleanFilename := fmt.Sprintf("%s - %s.mp3", cleanArtist, cleanTitle)
+		if cleanArtist == "" || cleanArtist == "Instagram" {
+			cleanFilename = fmt.Sprintf("%s.mp3", cleanTitle)
 		}
 
-		_, err = b.SendAudio(ctx, &bot.SendAudioParams{
+		// Build professional Persian caption
+		var caption string
+		if payload.IsFullTrack {
+			durationStr := ""
+			if payload.Duration > 0 {
+				durationStr = fmt.Sprintf("\n⏱ مدت زمان: %02d:%02d", payload.Duration/60, payload.Duration%60)
+			}
+			caption = fmt.Sprintf("✨ نسخه کامل و باکیفیت استودیویی (320kbps)\n\n🎵 نام اثر: %s\n👤 خواننده: %s%s",
+				payload.Title, payload.Performer, durationStr)
+		} else {
+			caption = "🎶 صدای اصلی خود ریلز اینستاگرام\n(نسخه استودیویی در پایگاه داده پیدا نشد)"
+		}
+
+		// Prepare send params
+		sendParams := &bot.SendAudioParams{
 			ChatID:    chatID,
-			Audio:     &models.InputFileUpload{Filename: filepath.Base(payload.FilePath), Data: f},
+			Audio:     &models.InputFileUpload{Filename: cleanFilename, Data: f},
 			Caption:   caption,
 			Title:     payload.Title,
 			Performer: payload.Performer,
-		})
+			Duration:  payload.Duration,
+		}
 
+		// Attach album cover art thumbnail if available
+		if payload.ThumbnailPath != "" {
+			if thumbFile, err := os.Open(payload.ThumbnailPath); err == nil {
+				defer thumbFile.Close()
+				sendParams.Thumbnail = &models.InputFileUpload{
+					Filename: filepath.Base(payload.ThumbnailPath),
+					Data:     thumbFile,
+				}
+			}
+		}
+
+		// Attach interactive inline buttons (Spotify, YouTube, Instagram Post)
+		inlineKeyboard := h.buildInlineKeyboard(payload, reelURL)
+		if inlineKeyboard != nil {
+			sendParams.ReplyMarkup = inlineKeyboard
+		}
+
+		_, err = b.SendAudio(ctx, sendParams)
 		if err != nil {
 			slog.Error("failed to send audio file to user", "chat_id", chatID, "err", err)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg)
@@ -178,9 +218,51 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			"chat_id", chatID,
 			"is_full_track", payload.IsFullTrack,
 			"title", payload.Title,
+			"clean_filename", cleanFilename,
+			"has_thumbnail", payload.ThumbnailPath != "",
 			"duration_ms", time.Since(startTime).Milliseconds(),
 		)
 	}()
+}
+
+func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL string) *models.InlineKeyboardMarkup {
+	var rows [][]models.InlineKeyboardButton
+
+	var streamButtons []models.InlineKeyboardButton
+	if payload.SpotifyURL != "" {
+		streamButtons = append(streamButtons, models.InlineKeyboardButton{
+			Text: "🎵 اسپاتیفای (Spotify)",
+			URL:  payload.SpotifyURL,
+		})
+	}
+	if payload.YouTubeURL != "" {
+		streamButtons = append(streamButtons, models.InlineKeyboardButton{
+			Text: "📺 یوتیوب (YouTube)",
+			URL:  payload.YouTubeURL,
+		})
+	}
+
+	if len(streamButtons) > 0 {
+		rows = append(rows, streamButtons)
+	}
+
+	// Always add link back to the original Instagram post
+	if reelURL != "" {
+		rows = append(rows, []models.InlineKeyboardButton{
+			{
+				Text: "🔗 مشاهده پست اینستاگرام",
+				URL:  reelURL,
+			},
+		})
+	}
+
+	if len(rows) == 0 {
+		return nil
+	}
+
+	return &models.InlineKeyboardMarkup{
+		InlineKeyboard: rows,
+	}
 }
 
 func (h *BotHandler) keepChatActionActive(ctx context.Context, b *bot.Bot, chatID int64, stop <-chan struct{}) {

@@ -14,7 +14,7 @@ type MusicRecognizer interface {
 }
 
 type MusicDownloader interface {
-	Download(ctx context.Context, targetDir, query string) (filePath string, err error)
+	Download(ctx context.Context, targetDir, query string) (filePath, thumbnailPath string, duration int, err error)
 }
 
 type ReelAudioUseCase interface {

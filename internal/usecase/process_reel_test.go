@@ -26,10 +26,10 @@ func (m *mockRecognizer) Identify(ctx context.Context, snippet string) (*domain.
 }
 
 type mockDownloader struct {
-	DownloadFunc func(ctx context.Context, dir, query string) (string, error)
+	DownloadFunc func(ctx context.Context, dir, query string) (string, string, int, error)
 }
 
-func (m *mockDownloader) Download(ctx context.Context, dir, query string) (string, error) {
+func (m *mockDownloader) Download(ctx context.Context, dir, query string) (string, string, int, error) {
 	return m.DownloadFunc(ctx, dir, query)
 }
 
@@ -45,12 +45,18 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		recognizer := &mockRecognizer{
 			IdentifyFunc: func(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
-				return &domain.TrackMetadata{Title: "Song A", Artist: "Artist B", IsMatched: true}, nil
+				return &domain.TrackMetadata{
+					Title:      "Song A",
+					Artist:     "Artist B",
+					IsMatched:  true,
+					Duration:   210,
+					SpotifyURL: "https://open.spotify.com/track/123",
+				}, nil
 			},
 		}
 		downloader := &mockDownloader{
-			DownloadFunc: func(ctx context.Context, dir, query string) (string, error) {
-				return "/tmp/full.mp3", nil
+			DownloadFunc: func(ctx context.Context, dir, query string) (string, string, int, error) {
+				return "/tmp/full.mp3", "/tmp/cover.jpg", 210, nil
 			},
 		}
 
@@ -60,7 +66,7 @@ func TestProcessReelAudio(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
-		if !res.IsFullTrack || res.Title != "Song A" || res.Performer != "Artist B" {
+		if !res.IsFullTrack || res.Title != "Song A" || res.Performer != "Artist B" || res.ThumbnailPath != "/tmp/cover.jpg" || res.Duration != 210 {
 			t.Errorf("unexpected output payload: %+v", res)
 		}
 	})
@@ -101,8 +107,8 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 		downloader := &mockDownloader{
-			DownloadFunc: func(ctx context.Context, dir, query string) (string, error) {
-				return "", errors.New("yt download failed")
+			DownloadFunc: func(ctx context.Context, dir, query string) (string, string, int, error) {
+				return "", "", 0, errors.New("yt download failed")
 			},
 		}
 

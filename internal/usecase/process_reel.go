@@ -29,13 +29,17 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 	meta, err := uc.recognizer.Identify(ctx, snippetPath)
 	if err == nil && meta != nil && meta.IsMatched {
 		searchQuery := fmt.Sprintf("%s %s audio", meta.Title, meta.Artist)
-		fullTrackPath, err := uc.downloader.Download(ctx, targetDir, searchQuery)
+		fullTrackPath, thumbnailPath, duration, err := uc.downloader.Download(ctx, targetDir, searchQuery)
 		if err == nil && fullTrackPath != "" {
 			return &domain.AudioPayload{
-				Title:       meta.Title,
-				Performer:   meta.Artist,
-				FilePath:    fullTrackPath,
-				IsFullTrack: true,
+				Title:         meta.Title,
+				Performer:     meta.Artist,
+				FilePath:      fullTrackPath,
+				ThumbnailPath: thumbnailPath,
+				Duration:      duration,
+				IsFullTrack:   true,
+				SpotifyURL:    meta.SpotifyURL,
+				YouTubeURL:    meta.YouTubeURL,
 			}, nil
 		}
 	}
