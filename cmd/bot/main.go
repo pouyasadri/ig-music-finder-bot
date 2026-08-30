@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"telegram-audio-bot/internal/adapter/downloader"
 	"telegram-audio-bot/internal/adapter/extractor"
@@ -39,14 +42,39 @@ func main() {
 
 	// 1. Adapters
 	mediaExtractor := extractor.NewYtDlpExtractor(cookiesPath)
-	musicRecognizer := recognizer.NewACRCloudRecognizer(acrHost, acrKey, acrSecret)
+
+	acrRecognizer := recognizer.NewACRCloudRecognizer(acrHost, acrKey, acrSecret)
+	
+	shazamScriptPath := os.Getenv("SHAZAM_SCRIPT_PATH")
+	if shazamScriptPath == "" {
+		shazamScriptPath = "/app/scripts/shazam_recognize.py"
+	}
+	shazamRecognizer := recognizer.NewShazamIORecognizer(shazamScriptPath)
+
+	auddToken := os.Getenv("AUDD_API_TOKEN")
+	auddRecognizer := recognizer.NewAudDRecognizer(auddToken, &http.Client{Timeout: 5 * time.Second})
+
+	compositeRecognizer := recognizer.NewFallbackRecognizer(
+		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
+		recognizer.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
+		recognizer.Engine{Name: "AudD", Recognizer: auddRecognizer, Timeout: 3 * time.Second},
+	)
+
+	platformRecognizer := recognizer.NewPlatformScraperRecognizer(cookiesPath)
 	musicDownloader := downloader.NewYouTubeDownloader()
 
 	// 2. Use Case
-	processReelUC := usecase.NewProcessReelUseCase(mediaExtractor, musicRecognizer, musicDownloader)
+	processReelUC := usecase.NewProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader)
 
-	// 3. Telegram Controller (Bounded to 2 parallel tasks)
-	botHandler := telegram.NewBotHandler(botToken, processReelUC, 2)
+	workerCount := 5
+	if wcStr := os.Getenv("WORKER_COUNT"); wcStr != "" {
+		if wc, err := strconv.Atoi(wcStr); err == nil && wc > 0 {
+			workerCount = wc
+		}
+	}
+
+	// 3. Telegram Controller
+	botHandler := telegram.NewBotHandler(botToken, processReelUC, workerCount)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
