@@ -1,0 +1,10 @@
+.git
+.gitignore
+.idea
+.env
+bin/
+*.log
+cookies.txt
+__pycache__/
+*.pyc
+
