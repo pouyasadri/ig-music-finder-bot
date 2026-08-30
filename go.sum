@@ -1,0 +1,4 @@
+github.com/acrcloud/acrcloud_sdk_golang v0.0.0-20230203071519-08f16377af01 h1:p/jvXvoRp7u8gzUj7zjkyeWlK3psR/2TmVMyYMbRVKQ=
+github.com/acrcloud/acrcloud_sdk_golang v0.0.0-20230203071519-08f16377af01/go.mod h1:aOBdRD/EBTCFDo7ssEfJSlKqLRZHUh1jh2Ya4CWvtjU=
+github.com/go-telegram/bot v1.24.0 h1:W/tWeUm8pkVkCGdf0n00fzJD/D31iAJ9RHFvIAZ2G9M=
+github.com/go-telegram/bot v1.24.0/go.mod h1:i2TRs7fXWIeaceF3z7KzsMt/he0TwkVC680mvdTFYeM=

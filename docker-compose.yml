@@ -1,0 +1,17 @@
+services:
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ig-audio-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - ACR_HOST=${ACR_HOST}
+      - ACR_KEY=${ACR_KEY}
+      - ACR_SECRET=${ACR_SECRET}
+      - COOKIES_PATH=/app/cookies.txt
+    volumes:
+      - ./cookies.txt:/app/cookies.txt:ro
+    tmpfs:
+      - /tmp:size=1G,mode=1777

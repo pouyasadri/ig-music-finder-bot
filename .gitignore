@@ -1,0 +1,14 @@
+# Binaries
+bin/
+/bot
+
+# Environment & credentials
+.env
+cookies.txt
+
+# IDE & OS files
+.idea/
+.vscode/
+.DS_Store
+/tmp/
+*.log
