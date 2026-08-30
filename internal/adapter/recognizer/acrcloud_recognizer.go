@@ -23,9 +23,9 @@ type acrResponse struct {
 	} `json:"status"`
 	Metadata struct {
 		Music []struct {
-			Title    string `json:"title"`
-			DurationMs int  `json:"duration_ms"`
-			Artists  []struct {
+			Title      string `json:"title"`
+			DurationMs int    `json:"duration_ms"`
+			Artists    []struct {
 				Name string `json:"name"`
 			} `json:"artists"`
 			ExternalMetadata struct {

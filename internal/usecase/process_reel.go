@@ -44,7 +44,7 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		urlCtx, cancelUrl := context.WithTimeout(ctx, 3*time.Second)
 		urlMeta, urlErr := uc.urlRecognizer.IdentifyByURL(urlCtx, reelURL)
 		cancelUrl()
-		
+
 		if urlErr == nil && urlMeta != nil && urlMeta.IsMatched {
 			meta = urlMeta
 			err = nil

@@ -44,7 +44,7 @@ func main() {
 	mediaExtractor := extractor.NewYtDlpExtractor(cookiesPath)
 
 	acrRecognizer := recognizer.NewACRCloudRecognizer(acrHost, acrKey, acrSecret)
-	
+
 	shazamScriptPath := os.Getenv("SHAZAM_SCRIPT_PATH")
 	if shazamScriptPath == "" {
 		shazamScriptPath = "/app/scripts/shazam_recognize.py"
