@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	igURLRegex      = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
+	igURLRegex       = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
 	sanitizeFilename = regexp.MustCompile(`[<>:"/\\|?*]`)
 )
 
@@ -100,7 +100,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		h.workerQueue <- struct{}{}
 		defer func() { <-h.workerQueue }()
 
-		workDir := fmt.Sprintf("/tmp/bot_req_%d", time.Now().UnixNano())
+		workDir := filepath.Join(getTempBaseDir(), fmt.Sprintf("bot_req_%d", time.Now().UnixNano()))
 		if err := os.MkdirAll(workDir, 0755); err != nil {
 			slog.Error("failed to create workdir", "err", err, "dir", workDir)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg)
@@ -166,7 +166,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			if payload.Duration > 0 {
 				durationStr = fmt.Sprintf("\n⏱ مدت زمان: %02d:%02d", payload.Duration/60, payload.Duration%60)
 			}
-			caption = fmt.Sprintf("✨ نسخه کامل و باکیفیت استودیویی (320kbps)\n\n🎵 نام اثر: %s\n👤 خواننده: %s%s",
+			caption = fmt.Sprintf("✨ نسخه کامل و باکیفیت استودیویی\n\n🎵 نام اثر: %s\n👤 خواننده: %s%s",
 				payload.Title, payload.Performer, durationStr)
 		} else {
 			caption = "🎶 صدای اصلی خود ریلز اینستاگرام\n(نسخه استودیویی در پایگاه داده پیدا نشد)"
@@ -199,9 +199,11 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			sendParams.ReplyMarkup = inlineKeyboard
 		}
 
+		uploadStart := time.Now()
 		_, err = b.SendAudio(ctx, sendParams)
+		uploadMs := time.Since(uploadStart).Milliseconds()
 		if err != nil {
-			slog.Error("failed to send audio file to user", "chat_id", chatID, "err", err)
+			slog.Error("failed to send audio file to user", "chat_id", chatID, "err", err, "upload_ms", uploadMs)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg)
 			return
 		}
@@ -220,7 +222,8 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			"title", payload.Title,
 			"clean_filename", cleanFilename,
 			"has_thumbnail", payload.ThumbnailPath != "",
-			"duration_ms", time.Since(startTime).Milliseconds(),
+			"upload_ms", uploadMs,
+			"total_ms", time.Since(startTime).Milliseconds(),
 		)
 	}()
 }
@@ -302,4 +305,11 @@ func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID in
 		ChatID: chatID,
 		Text:   "متأسفانه نتونستم صدای این پست رو دریافت کنم. ممکنه پیج پرایوت باشه یا اینستاگرام موقتاً محدود کرده باشه 😕",
 	})
+}
+
+func getTempBaseDir() string {
+	if fi, err := os.Stat("/dev/shm"); err == nil && fi.IsDir() {
+		return "/dev/shm"
+	}
+	return os.TempDir()
 }
