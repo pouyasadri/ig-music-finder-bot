@@ -166,7 +166,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			if payload.Duration > 0 {
 				durationStr = fmt.Sprintf("\n⏱ مدت زمان: %02d:%02d", payload.Duration/60, payload.Duration%60)
 			}
-			caption = fmt.Sprintf("✨ نسخه کامل و باکیفیت استودیویی\n\n🎵 نام اثر: %s\n👤 خواننده: %s%s",
+			caption = fmt.Sprintf("🎵 نام اثر: %s\n👤 خواننده: %s%s",
 				payload.Title, payload.Performer, durationStr)
 		} else {
 			caption = "🎶 صدای اصلی خود ریلز اینستاگرام\n(نسخه استودیویی در پایگاه داده پیدا نشد)"
@@ -232,12 +232,7 @@ func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL s
 	var rows [][]models.InlineKeyboardButton
 
 	var streamButtons []models.InlineKeyboardButton
-	if payload.SpotifyURL != "" {
-		streamButtons = append(streamButtons, models.InlineKeyboardButton{
-			Text: "🎵 اسپاتیفای (Spotify)",
-			URL:  payload.SpotifyURL,
-		})
-	}
+
 	if payload.YouTubeURL != "" {
 		streamButtons = append(streamButtons, models.InlineKeyboardButton{
 			Text: "📺 یوتیوب (YouTube)",

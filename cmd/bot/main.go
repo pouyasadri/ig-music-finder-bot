@@ -55,8 +55,8 @@ func main() {
 	auddRecognizer := recognizer.NewAudDRecognizer(auddToken, &http.Client{Timeout: 5 * time.Second})
 
 	compositeRecognizer := recognizer.NewFallbackRecognizer(
-		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 		recognizer.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
+		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 		recognizer.Engine{Name: "AudD", Recognizer: auddRecognizer, Timeout: 3 * time.Second},
 	)
 
