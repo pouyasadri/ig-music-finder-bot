@@ -21,20 +21,23 @@ func NewYtDlpExtractor(cookiesPath string) usecase.MediaExtractor {
 }
 
 func (e *YtDlpExtractor) ExtractReel(ctx context.Context, targetDir, url string) (string, string, error) {
-	rawPath := filepath.Join(targetDir, "raw_reel.mp3")
+	outputPattern := filepath.Join(targetDir, "raw_reel.%(ext)s")
 	snippetPath := filepath.Join(targetDir, "snippet.mp3")
 
 	// Set a bounded timeout context for reel extraction
 	extractCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	// Download audio only (-f "ba/b") to save bandwidth and maximize speed
+	// Download smallest media stream with 4 concurrent threads to maximize speed
+	// Instagram lacks audio-only streams; using "ba/worst/b" downloads 240p/360p (~1-2MB) with identical 128k AAC audio instead of 1080p (~30-50MB)
 	args := []string{
-		"-f", "ba/b",
-		"-x",
-		"--audio-format", "mp3",
+		"-f", "ba/worst/b",
+		"-N", "4",
+		"--concurrent-fragments", "4",
 		"--no-playlist",
-		"-o", rawPath,
+		"--no-check-certificates",
+		"--socket-timeout", "10",
+		"-o", outputPattern,
 	}
 
 	// Only attach cookies if the file exists and is not empty
@@ -49,8 +52,15 @@ func (e *YtDlpExtractor) ExtractReel(ctx context.Context, targetDir, url string)
 		return "", "", fmt.Errorf("yt-dlp extract error: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 
-	// Create 10s audio snippet using fast seek for ACRCloud fingerprinting
-	ffCmd := exec.CommandContext(extractCtx, "ffmpeg", "-y", "-ss", "0", "-t", "10", "-i", rawPath, "-acodec", "copy", snippetPath)
+	// Locate the downloaded raw audio file
+	matches, err := filepath.Glob(filepath.Join(targetDir, "raw_reel.*"))
+	if err != nil || len(matches) == 0 {
+		return "", "", fmt.Errorf("failed to locate extracted raw audio in %s", targetDir)
+	}
+	rawPath := matches[0]
+
+	// Create 10s audio snippet using fast seek for ACRCloud fingerprinting (only converts 10s)
+	ffCmd := exec.CommandContext(extractCtx, "ffmpeg", "-y", "-ss", "0", "-t", "10", "-i", rawPath, "-vn", "-acodec", "libmp3lame", "-q:a", "4", snippetPath)
 	_ = ffCmd.Run()
 
 	return rawPath, snippetPath, nil
