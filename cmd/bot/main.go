@@ -74,7 +74,8 @@ func main() {
 	}
 
 	// 3. Telegram Controller
-	botHandler := telegram.NewBotHandler(botToken, processReelUC, workerCount)
+	channelID := os.Getenv("CHANNEL_ID")
+	botHandler := telegram.NewBotHandler(botToken, processReelUC, workerCount, channelID)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

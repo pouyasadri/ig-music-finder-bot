@@ -26,19 +26,22 @@ type BotHandler struct {
 	token       string
 	useCase     usecase.ReelAudioUseCase
 	workerQueue chan struct{}
+	channelID   string
 }
 
-func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int) *BotHandler {
+func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, channelID string) *BotHandler {
 	return &BotHandler{
 		token:       token,
 		useCase:     uc,
 		workerQueue: make(chan struct{}, maxWorkers),
+		channelID:   channelID,
 	}
 }
 
 func (h *BotHandler) Start(ctx context.Context) error {
 	opts := []bot.Option{
 		bot.WithDefaultHandler(h.handleMessage),
+		bot.WithCallbackQueryDataHandler("send_to_channel", bot.MatchTypeExact, h.handleSendToChannel),
 	}
 	b, err := bot.New(h.token, opts...)
 	if err != nil {
@@ -254,6 +257,15 @@ func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL s
 		})
 	}
 
+	if h.channelID != "" {
+		rows = append(rows, []models.InlineKeyboardButton{
+			{
+				Text:         "📣 ارسال به کانال",
+				CallbackData: "send_to_channel",
+			},
+		})
+	}
+
 	if len(rows) == 0 {
 		return nil
 	}
@@ -307,4 +319,70 @@ func getTempBaseDir() string {
 		return "/dev/shm"
 	}
 	return os.TempDir()
+}
+
+func (h *BotHandler) handleSendToChannel(ctx context.Context, b *bot.Bot, update *models.Update) {
+	if h.channelID == "" {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "کانال تنظیم نشده است.",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	msg := update.CallbackQuery.Message.Message
+	if msg == nil {
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "خطا در دریافت پیام اصلی ❌",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	// Reconstruct the keyboard without the "send_to_channel" button for the channel
+	var newRows [][]models.InlineKeyboardButton
+	if msg.ReplyMarkup != nil && len(msg.ReplyMarkup.InlineKeyboard) > 0 {
+		for _, row := range msg.ReplyMarkup.InlineKeyboard {
+			var newRow []models.InlineKeyboardButton
+			for _, btn := range row {
+				if btn.CallbackData != "send_to_channel" {
+					newRow = append(newRow, btn)
+				}
+			}
+			if len(newRow) > 0 {
+				newRows = append(newRows, newRow)
+			}
+		}
+	}
+
+	var replyMarkup models.ReplyMarkup
+	if len(newRows) > 0 {
+		replyMarkup = &models.InlineKeyboardMarkup{
+			InlineKeyboard: newRows,
+		}
+	}
+
+	_, err := b.CopyMessage(ctx, &bot.CopyMessageParams{
+		ChatID:      h.channelID,
+		FromChatID:  msg.Chat.ID,
+		MessageID:   msg.ID,
+		ReplyMarkup: replyMarkup,
+	})
+
+	if err != nil {
+		slog.Error("failed to copy message to channel", "err", err)
+		b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+			CallbackQueryID: update.CallbackQuery.ID,
+			Text:            "خطا در ارسال به کانال ❌",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		Text:            "با موفقیت به کانال ارسال شد ✅",
+	})
 }
