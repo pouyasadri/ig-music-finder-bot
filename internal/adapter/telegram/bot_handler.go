@@ -64,10 +64,18 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 
 	// Handle /start or /help
 	if text == "/start" || text == "/help" {
+		kb := &models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{
+				{
+					{Text: "اشتراک‌گذاری ربات 🚀", URL: "https://t.me/share/url?url=&text=این+ربات+برای+دانلود+آهنگ+های+اینستاگرام+عالیه!+🎧"},
+				},
+			},
+		}
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text: "سلام! 👋 خوش اومدی.\n\n" +
 				"فقط کافیه لینک ریلز یا پست اینستاگرام رو برام بفرستی تا آهنگش رو برات پیدا کنم و با کیفیت عالی تحویلت بدم 🎧",
+			ReplyMarkup: kb,
 		})
 		return
 	}
@@ -99,6 +107,14 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 	go func() {
 		startTime := time.Now()
 
+		if len(h.workerQueue) == cap(h.workerQueue) {
+			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+				ChatID:    chatID,
+				MessageID: statusMsg.ID,
+				Text:      "شما در صف انتظار هستید. ربات در حال حاضر شلوغ است، لطفاً کمی صبر کنید... ⏳",
+			})
+		}
+
 		// Acquire worker slot
 		h.workerQueue <- struct{}{}
 		defer func() { <-h.workerQueue }()
@@ -106,7 +122,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		workDir := filepath.Join(getTempBaseDir(), fmt.Sprintf("bot_req_%d", time.Now().UnixNano()))
 		if err := os.MkdirAll(workDir, 0755); err != nil {
 			slog.Error("failed to create workdir", "err", err, "dir", workDir)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
 		defer os.RemoveAll(workDir) // Strict cleanup
@@ -116,11 +132,19 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		go h.keepChatActionActive(ctx, b, chatID, stopChatAction)
 		defer close(stopChatAction)
 
+		progressCb := func(msg string) {
+			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+				ChatID:    chatID,
+				MessageID: statusMsg.ID,
+				Text:      msg,
+			})
+		}
+
 		// Execute business usecase
-		payload, err := h.useCase.Execute(ctx, workDir, reelURL)
+		payload, err := h.useCase.Execute(ctx, workDir, reelURL, progressCb)
 		if err != nil {
 			slog.Error("failed to process reel audio", "chat_id", chatID, "err", err, "url", reelURL)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
 
@@ -128,7 +152,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		fileInfo, err := os.Stat(payload.FilePath)
 		if err != nil {
 			slog.Error("output file stat failed", "err", err, "path", payload.FilePath)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
 
@@ -146,7 +170,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		f, err := os.Open(payload.FilePath)
 		if err != nil {
 			slog.Error("failed to open output file", "err", err)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
 		defer f.Close()
@@ -207,7 +231,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		uploadMs := time.Since(uploadStart).Milliseconds()
 		if err != nil {
 			slog.Error("failed to send audio file to user", "chat_id", chatID, "err", err, "upload_ms", uploadMs)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
 
@@ -234,27 +258,24 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL string) *models.InlineKeyboardMarkup {
 	var rows [][]models.InlineKeyboardButton
 
-	var streamButtons []models.InlineKeyboardButton
+	var linkRow []models.InlineKeyboardButton
 
 	if payload.YouTubeURL != "" {
-		streamButtons = append(streamButtons, models.InlineKeyboardButton{
+		linkRow = append(linkRow, models.InlineKeyboardButton{
 			Text: "📺 یوتیوب (YouTube)",
 			URL:  payload.YouTubeURL,
 		})
 	}
 
-	if len(streamButtons) > 0 {
-		rows = append(rows, streamButtons)
+	if reelURL != "" {
+		linkRow = append(linkRow, models.InlineKeyboardButton{
+			Text: "🔗 مشاهده پست",
+			URL:  reelURL,
+		})
 	}
 
-	// Always add link back to the original Instagram post
-	if reelURL != "" {
-		rows = append(rows, []models.InlineKeyboardButton{
-			{
-				Text: "🔗 مشاهده پست اینستاگرام",
-				URL:  reelURL,
-			},
-		})
+	if len(linkRow) > 0 {
+		rows = append(rows, linkRow)
 	}
 
 	if h.channelID != "" {
@@ -300,7 +321,7 @@ func (h *BotHandler) keepChatActionActive(ctx context.Context, b *bot.Bot, chatI
 	}
 }
 
-func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID int64, statusMsg *models.Message) {
+func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID int64, statusMsg *models.Message, err error) {
 	if statusMsg != nil {
 		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
 			ChatID:    chatID,
@@ -308,9 +329,14 @@ func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID in
 		})
 	}
 
+	msgText := "متأسفانه نتونستم صدای این پست رو دریافت کنم. ممکنه پیج پرایوت باشه یا اینستاگرام موقتاً محدود کرده باشه 😕"
+	if err != nil && strings.Contains(err.Error(), "extraction failed") {
+		msgText = "❌ متأسفانه نتوانستم ویدیو را دانلود کنم. اگر این پیج پرایوت (Private) است، ربات قادر به دانلود آن نیست. لطفاً فقط لینک‌های پابلیک بفرستید."
+	}
+
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
-		Text:   "متأسفانه نتونستم صدای این پست رو دریافت کنم. ممکنه پیج پرایوت باشه یا اینستاگرام موقتاً محدود کرده باشه 😕",
+		Text:   msgText,
 	})
 }
 

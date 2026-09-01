@@ -56,12 +56,17 @@ func main() {
 
 	compositeRecognizer := recognizer.NewFallbackRecognizer(
 		recognizer.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
-		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 		recognizer.Engine{Name: "AudD", Recognizer: auddRecognizer, Timeout: 3 * time.Second},
+		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 	)
 
 	platformRecognizer := recognizer.NewPlatformScraperRecognizer(cookiesPath)
-	musicDownloader := downloader.NewYouTubeDownloader()
+	soundCloudDownloader := downloader.NewSoundCloudDownloader()
+	youTubeDownloader := downloader.NewYouTubeDownloader()
+	musicDownloader := downloader.NewFallbackDownloader(
+		downloader.NamedDownloader{Name: "SoundCloud", Downloader: soundCloudDownloader},
+		downloader.NamedDownloader{Name: "YouTube", Downloader: youTubeDownloader},
+	)
 
 	// 2. Use Case
 	processReelUC := usecase.NewProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader)

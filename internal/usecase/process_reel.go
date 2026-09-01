@@ -25,7 +25,10 @@ func NewProcessReelUseCase(e MediaExtractor, r MusicRecognizer, u URLMusicRecogn
 	}
 }
 
-func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL string) (*domain.AudioPayload, error) {
+func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL string, progressCb func(string)) (*domain.AudioPayload, error) {
+	if progressCb != nil {
+		progressCb("🔍 در حال استخراج ویدیو از اینستاگرام...")
+	}
 	t0 := time.Now()
 	rawPath, snippetPath, err := uc.extractor.ExtractReel(ctx, targetDir, reelURL)
 	extractMs := time.Since(t0).Milliseconds()
@@ -34,6 +37,9 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		return nil, fmt.Errorf("%w: %v", domain.ErrExtractionFailed, err)
 	}
 
+	if progressCb != nil {
+		progressCb("🎵 در حال تشخیص آهنگ...")
+	}
 	t1 := time.Now()
 	meta, err := uc.recognizer.Identify(ctx, snippetPath)
 	recognizeMs := time.Since(t1).Milliseconds()
@@ -53,12 +59,14 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 	}
 
 	if err == nil && meta != nil && meta.IsMatched {
+		if progressCb != nil {
+			progressCb(fmt.Sprintf("✅ آهنگ پیدا شد: %s\n⬇️ در حال دانلود کیفیت بالا...", meta.Title))
+		}
 		slog.Info("track recognized", "title", meta.Title, "artist", meta.Artist, "extract_ms", extractMs, "recognize_ms", recognizeMs)
 
-		// Prefer direct YouTube URL if ACRCloud provided it, avoiding expensive search queries
-		downloadTarget := meta.YouTubeURL
-		if downloadTarget == "" {
-			downloadTarget = fmt.Sprintf("%s %s audio", meta.Title, meta.Artist)
+		downloadTarget := fmt.Sprintf("%s %s", meta.Title, meta.Artist)
+		if meta.Artist == "" {
+			downloadTarget = meta.Title
 		}
 
 		t2 := time.Now()
@@ -71,6 +79,10 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 			finalDuration := duration
 			if finalDuration <= 0 {
 				finalDuration = meta.Duration
+			}
+
+			if progressCb != nil {
+				progressCb("📤 در حال ارسال فایل صوتی...")
 			}
 
 			return &domain.AudioPayload{
@@ -87,6 +99,10 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		slog.Warn("download failed, falling back to raw reel audio", "download_ms", downloadMs, "err", err)
 	} else {
 		slog.Info("unrecognized sound, using raw reel audio", "extract_ms", extractMs, "recognize_ms", recognizeMs)
+	}
+
+	if progressCb != nil {
+		progressCb("📤 آهنگ پیدا نشد. در حال ارسال صدای اصلی ویدیو...")
 	}
 
 	// Fallback response

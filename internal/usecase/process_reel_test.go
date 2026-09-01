@@ -61,7 +61,7 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 
 		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
 
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
@@ -85,7 +85,7 @@ func TestProcessReelAudio(t *testing.T) {
 		downloader := &mockDownloader{}
 
 		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
 
 		if err != nil {
 			t.Fatalf("expected successful fallback, got: %v", err)
@@ -113,7 +113,7 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 
 		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
 
 		if err != nil {
 			t.Fatalf("expected fallback on download failure, got: %v", err)
@@ -123,7 +123,7 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 	})
 
-	t.Run("success: direct YouTube URL routing when available", func(t *testing.T) {
+	t.Run("success: clean title and artist passed to downloader", func(t *testing.T) {
 		var downloadedTarget string
 		extractor := &mockExtractor{
 			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
@@ -149,13 +149,13 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 
 		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
 
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
-		if downloadedTarget != "https://www.youtube.com/watch?v=direct123" {
-			t.Errorf("expected direct YouTube URL to be passed to downloader, got: %s", downloadedTarget)
+		if downloadedTarget != "Song Direct Artist Direct" {
+			t.Errorf("expected clean title and artist query, got: %s", downloadedTarget)
 		}
 		if res.Duration != 180 {
 			t.Errorf("expected fallback to meta.Duration (180), got: %d", res.Duration)
@@ -172,7 +172,7 @@ func TestProcessReelAudio(t *testing.T) {
 		downloader := &mockDownloader{}
 
 		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123")
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
 
 		if err == nil {
 			t.Fatalf("expected error on extraction failure, got nil")

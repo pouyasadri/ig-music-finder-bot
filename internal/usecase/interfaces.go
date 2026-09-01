@@ -22,5 +22,5 @@ type MusicDownloader interface {
 }
 
 type ReelAudioUseCase interface {
-	Execute(ctx context.Context, targetDir, reelURL string) (*domain.AudioPayload, error)
+	Execute(ctx context.Context, targetDir, reelURL string, progressCb func(string)) (*domain.AudioPayload, error)
 }
