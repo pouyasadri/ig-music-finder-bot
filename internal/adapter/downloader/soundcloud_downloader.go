@@ -24,7 +24,7 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 
 	targetInput := target
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") && !strings.HasPrefix(target, "scsearch") {
-		targetInput = fmt.Sprintf("scsearch1:%s", target)
+		targetInput = fmt.Sprintf("scsearch3:%s", target)
 	}
 
 	// SoundCloud downloads are much faster, 45s bounded timeout
@@ -35,6 +35,9 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 		"-f", "ba/b",
 		"-N", "4",
 		"--concurrent-fragments", "4",
+		"--max-downloads", "1",
+		"--no-abort-on-error",
+		"--match-filter", "!drm",
 		"-x",
 		"--audio-format", "mp3",
 		"--audio-quality", "5",
@@ -49,11 +52,14 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 		targetInput,
 	)
 
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", "", 0, fmt.Errorf("soundcloud download error: %w (output: %s)", err, strings.TrimSpace(string(out)))
-	}
+	out, cmdErr := cmd.CombinedOutput()
 
-	if _, err := os.Stat(audioPath); os.IsNotExist(err) {
+	// Verify if audio file was written successfully (even if yt-dlp exited with status 101 for --max-downloads)
+	if fi, err := os.Stat(audioPath); err == nil && fi.Size() > 0 {
+		// Success!
+	} else if cmdErr != nil {
+		return "", "", 0, fmt.Errorf("soundcloud download error: %w (output: %s)", cmdErr, strings.TrimSpace(string(out)))
+	} else {
 		return "", "", 0, fmt.Errorf("audio file not written: %w", err)
 	}
 
