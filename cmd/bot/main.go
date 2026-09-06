@@ -68,8 +68,9 @@ func main() {
 		downloader.NamedDownloader{Name: "YouTube", Downloader: youTubeDownloader},
 	)
 
-	// 2. Use Case
+	// 2. Use Cases
 	processReelUC := usecase.NewProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader)
+	processSoundCloudUC := usecase.NewProcessSoundCloudUseCase(soundCloudDownloader)
 
 	workerCount := 5
 	if wcStr := os.Getenv("WORKER_COUNT"); wcStr != "" {
@@ -80,7 +81,7 @@ func main() {
 
 	// 3. Telegram Controller
 	channelID := os.Getenv("CHANNEL_ID")
-	botHandler := telegram.NewBotHandler(botToken, processReelUC, workerCount, channelID)
+	botHandler := telegram.NewBotHandler(botToken, processReelUC, processSoundCloudUC, workerCount, channelID)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

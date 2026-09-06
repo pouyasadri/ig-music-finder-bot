@@ -18,23 +18,26 @@ import (
 )
 
 var (
-	igURLRegex       = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
-	sanitizeFilename = regexp.MustCompile(`[<>:"/\\|?*]`)
+	igURLRegex         = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
+	soundCloudURLRegex = regexp.MustCompile(`https?://(?:(?:www\.|m\.)?soundcloud\.com/[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-\.]+/?|on\.soundcloud\.com/[a-zA-Z0-9_\-]+/?|soundcloud\.app\.goo\.gl/[a-zA-Z0-9_\-]+/?)(?:\?[^\s]*)?`)
+	sanitizeFilename   = regexp.MustCompile(`[<>:"/\\|?*]`)
 )
 
 type BotHandler struct {
-	token       string
-	useCase     usecase.ReelAudioUseCase
-	workerQueue chan struct{}
-	channelID   string
+	token             string
+	reelUseCase       usecase.ReelAudioUseCase
+	soundCloudUseCase usecase.SoundCloudAudioUseCase
+	workerQueue       chan struct{}
+	channelID         string
 }
 
-func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, channelID string) *BotHandler {
+func NewBotHandler(token string, ruc usecase.ReelAudioUseCase, scuc usecase.SoundCloudAudioUseCase, maxWorkers int, channelID string) *BotHandler {
 	return &BotHandler{
-		token:       token,
-		useCase:     uc,
-		workerQueue: make(chan struct{}, maxWorkers),
-		channelID:   channelID,
+		token:             token,
+		reelUseCase:       ruc,
+		soundCloudUseCase: scuc,
+		workerQueue:       make(chan struct{}, maxWorkers),
+		channelID:         channelID,
 	}
 }
 
@@ -53,6 +56,14 @@ func (h *BotHandler) Start(ctx context.Context) error {
 	return nil
 }
 
+type audioJob struct {
+	platform        string
+	sourceURL       string
+	initialAckText  string
+	fallbackErrText string
+	execute         func(ctx context.Context, workDir string, progressCb func(string)) (*domain.AudioPayload, error)
+}
+
 func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -67,41 +78,79 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		kb := &models.InlineKeyboardMarkup{
 			InlineKeyboard: [][]models.InlineKeyboardButton{
 				{
-					{Text: "اشتراک‌گذاری ربات 🚀", URL: "https://t.me/share/url?url=&text=این+ربات+برای+دانلود+آهنگ+های+اینستاگرام+عالیه!+🎧"},
+					{Text: "اشتراک‌گذاری ربات 🚀", URL: "https://t.me/share/url?url=&text=این+ربات+برای+دانلود+آهنگ+های+اینستاگرام+و+ساندکلاد+عالیه!+🎧"},
 				},
 			},
 		}
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text: "سلام! 👋 خوش اومدی.\n\n" +
-				"فقط کافیه لینک ریلز یا پست اینستاگرام رو برام بفرستی تا آهنگش رو برات پیدا کنم و با کیفیت عالی تحویلت بدم 🎧",
+				"کافیه لینک ریلز/پست اینستاگرام یا لینک آهنگ ساندکلاد (SoundCloud) رو برام بفرستی تا با کیفیت عالی برات دانلود کنم و تحویلت بدم 🎧",
 			ReplyMarkup: kb,
 		})
 		return
 	}
 
 	// Validate Instagram URL format
-	match := igURLRegex.FindString(text)
-	if match == "" {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text: "❌ لطفاً یک لینک معتبر ریلز یا پست اینستاگرام بفرست.\n\n" +
-				"مثال:\nhttps://www.instagram.com/reel/C-xyz123/",
-		})
+	if match := igURLRegex.FindString(text); match != "" {
+		h.handleInstagram(ctx, b, chatID, userID, match)
 		return
 	}
 
-	reelURL := match
+	// Validate SoundCloud URL format
+	if match := soundCloudURLRegex.FindString(text); match != "" {
+		h.handleSoundCloud(ctx, b, chatID, userID, match)
+		return
+	}
+
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: chatID,
+		Text: "❌ لطفاً یک لینک معتبر ریلز یا پست اینستاگرام، یا لینک آهنگ ساندکلاد بفرست.\n\n" +
+			"مثال اینستاگرام:\nhttps://www.instagram.com/reel/C-xyz123/\n\n" +
+			"مثال ساندکلاد:\nhttps://soundcloud.com/artist/track-name",
+	})
+}
+
+func (h *BotHandler) handleInstagram(ctx context.Context, b *bot.Bot, chatID, userID int64, reelURL string) {
 	slog.Info("processing new reel request",
 		"chat_id", chatID,
 		"user_id", userID,
 		"url", reelURL,
 	)
 
-	// Send initial acknowledgment message in casual Farsi
+	h.processAudioJob(ctx, b, chatID, userID, audioJob{
+		platform:        "instagram",
+		sourceURL:       reelURL,
+		initialAckText:  "📥 دریافت شد! در حال استخراج و بررسی صدای ریلز... ⏳",
+		fallbackErrText: "متأسفانه نتونستم صدای این پست رو دریافت کنم. ممکنه پیج پرایوت باشه یا اینستاگرام موقتاً محدود کرده باشه 😕",
+		execute: func(ctx context.Context, workDir string, progressCb func(string)) (*domain.AudioPayload, error) {
+			return h.reelUseCase.Execute(ctx, workDir, reelURL, progressCb)
+		},
+	})
+}
+
+func (h *BotHandler) handleSoundCloud(ctx context.Context, b *bot.Bot, chatID, userID int64, soundCloudURL string) {
+	slog.Info("processing new soundcloud request",
+		"chat_id", chatID,
+		"user_id", userID,
+		"url", soundCloudURL,
+	)
+
+	h.processAudioJob(ctx, b, chatID, userID, audioJob{
+		platform:        "soundcloud",
+		sourceURL:       soundCloudURL,
+		initialAckText:  "📥 دریافت شد! در حال دانلود از ساندکلاد... ⏳",
+		fallbackErrText: "متأسفانه نتونستم این آهنگ رو از ساندکلاد دانلود کنم. لطفاً از صحت لینک اطمینان حاصل کن 😕",
+		execute: func(ctx context.Context, workDir string, progressCb func(string)) (*domain.AudioPayload, error) {
+			return h.soundCloudUseCase.Execute(ctx, workDir, soundCloudURL, progressCb)
+		},
+	})
+}
+
+func (h *BotHandler) processAudioJob(ctx context.Context, b *bot.Bot, chatID, userID int64, job audioJob) {
 	statusMsg, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
-		Text:   "📥 دریافت شد! در حال استخراج و بررسی صدای ریلز... ⏳",
+		Text:   job.initialAckText,
 	})
 
 	go func() {
@@ -122,7 +171,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		workDir := filepath.Join(getTempBaseDir(), fmt.Sprintf("bot_req_%d", time.Now().UnixNano()))
 		if err := os.MkdirAll(workDir, 0755); err != nil {
 			slog.Error("failed to create workdir", "err", err, "dir", workDir)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, job.fallbackErrText, err)
 			return
 		}
 		defer os.RemoveAll(workDir) // Strict cleanup
@@ -141,10 +190,10 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		}
 
 		// Execute business usecase
-		payload, err := h.useCase.Execute(ctx, workDir, reelURL, progressCb)
+		payload, err := job.execute(ctx, workDir, progressCb)
 		if err != nil {
-			slog.Error("failed to process reel audio", "chat_id", chatID, "err", err, "url", reelURL)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
+			slog.Error("failed to process audio", "chat_id", chatID, "platform", job.platform, "err", err, "url", job.sourceURL)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, job.fallbackErrText, err)
 			return
 		}
 
@@ -152,7 +201,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		fileInfo, err := os.Stat(payload.FilePath)
 		if err != nil {
 			slog.Error("output file stat failed", "err", err, "path", payload.FilePath)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, job.fallbackErrText, err)
 			return
 		}
 
@@ -170,7 +219,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		f, err := os.Open(payload.FilePath)
 		if err != nil {
 			slog.Error("failed to open output file", "err", err)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, job.fallbackErrText, err)
 			return
 		}
 		defer f.Close()
@@ -182,7 +231,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			cleanTitle = "Audio"
 		}
 		cleanFilename := fmt.Sprintf("%s - %s.mp3", cleanArtist, cleanTitle)
-		if cleanArtist == "" || cleanArtist == "Instagram" {
+		if cleanArtist == "" || cleanArtist == "Instagram" || cleanArtist == "SoundCloud" {
 			cleanFilename = fmt.Sprintf("%s.mp3", cleanTitle)
 		}
 
@@ -220,8 +269,8 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			}
 		}
 
-		// Attach interactive inline buttons (Spotify, YouTube, Instagram Post)
-		inlineKeyboard := h.buildInlineKeyboard(payload, reelURL)
+		// Attach interactive inline buttons (SoundCloud, YouTube, Instagram, Channel)
+		inlineKeyboard := h.buildInlineKeyboard(payload, job.sourceURL, job.platform)
 		if inlineKeyboard != nil {
 			sendParams.ReplyMarkup = inlineKeyboard
 		}
@@ -231,7 +280,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		uploadMs := time.Since(uploadStart).Milliseconds()
 		if err != nil {
 			slog.Error("failed to send audio file to user", "chat_id", chatID, "err", err, "upload_ms", uploadMs)
-			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
+			h.sendErrorMessage(ctx, b, chatID, statusMsg, job.fallbackErrText, err)
 			return
 		}
 
@@ -243,8 +292,9 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			})
 		}
 
-		slog.Info("reel audio processed and delivered successfully",
+		slog.Info("audio processed and delivered successfully",
 			"chat_id", chatID,
+			"platform", job.platform,
 			"is_full_track", payload.IsFullTrack,
 			"title", payload.Title,
 			"clean_filename", cleanFilename,
@@ -255,10 +305,21 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 	}()
 }
 
-func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL string) *models.InlineKeyboardMarkup {
+func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, sourceURL, platform string) *models.InlineKeyboardMarkup {
 	var rows [][]models.InlineKeyboardButton
-
 	var linkRow []models.InlineKeyboardButton
+
+	if payload.SoundCloudURL != "" {
+		linkRow = append(linkRow, models.InlineKeyboardButton{
+			Text: "☁️ ساندکلاد (SoundCloud)",
+			URL:  payload.SoundCloudURL,
+		})
+	} else if platform == "soundcloud" && sourceURL != "" {
+		linkRow = append(linkRow, models.InlineKeyboardButton{
+			Text: "☁️ ساندکلاد (SoundCloud)",
+			URL:  sourceURL,
+		})
+	}
 
 	if payload.YouTubeURL != "" {
 		linkRow = append(linkRow, models.InlineKeyboardButton{
@@ -267,10 +328,17 @@ func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL s
 		})
 	}
 
-	if reelURL != "" {
+	if payload.SpotifyURL != "" {
+		linkRow = append(linkRow, models.InlineKeyboardButton{
+			Text: "🟢 اسپاتیفای (Spotify)",
+			URL:  payload.SpotifyURL,
+		})
+	}
+
+	if platform == "instagram" && sourceURL != "" {
 		linkRow = append(linkRow, models.InlineKeyboardButton{
 			Text: "🔗 مشاهده پست",
-			URL:  reelURL,
+			URL:  sourceURL,
 		})
 	}
 
@@ -321,7 +389,7 @@ func (h *BotHandler) keepChatActionActive(ctx context.Context, b *bot.Bot, chatI
 	}
 }
 
-func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID int64, statusMsg *models.Message, err error) {
+func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID int64, statusMsg *models.Message, defaultMsg string, err error) {
 	if statusMsg != nil {
 		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{
 			ChatID:    chatID,
@@ -329,7 +397,7 @@ func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID in
 		})
 	}
 
-	msgText := "متأسفانه نتونستم صدای این پست رو دریافت کنم. ممکنه پیج پرایوت باشه یا اینستاگرام موقتاً محدود کرده باشه 😕"
+	msgText := defaultMsg
 	if err != nil && strings.Contains(err.Error(), "extraction failed") {
 		msgText = "❌ متأسفانه نتوانستم ویدیو را دانلود کنم. اگر این پیج پرایوت (Private) است، ربات قادر به دانلود آن نیست. لطفاً فقط لینک‌های پابلیک بفرستید."
 	}

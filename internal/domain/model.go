@@ -18,4 +18,5 @@ type AudioPayload struct {
 	IsFullTrack   bool
 	SpotifyURL    string
 	YouTubeURL    string
+	SoundCloudURL string
 }

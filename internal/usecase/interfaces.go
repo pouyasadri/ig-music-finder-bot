@@ -24,3 +24,11 @@ type MusicDownloader interface {
 type ReelAudioUseCase interface {
 	Execute(ctx context.Context, targetDir, reelURL string, progressCb func(string)) (*domain.AudioPayload, error)
 }
+
+type SoundCloudTrackDownloader interface {
+	DownloadTrack(ctx context.Context, targetDir, url string) (*domain.AudioPayload, error)
+}
+
+type SoundCloudAudioUseCase interface {
+	Execute(ctx context.Context, targetDir, soundCloudURL string, progressCb func(string)) (*domain.AudioPayload, error)
+}
