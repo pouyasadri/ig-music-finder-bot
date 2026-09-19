@@ -328,13 +328,6 @@ func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, sourceURL
 		})
 	}
 
-	if payload.SpotifyURL != "" {
-		linkRow = append(linkRow, models.InlineKeyboardButton{
-			Text: "🟢 اسپاتیفای (Spotify)",
-			URL:  payload.SpotifyURL,
-		})
-	}
-
 	if platform == "instagram" && sourceURL != "" {
 		linkRow = append(linkRow, models.InlineKeyboardButton{
 			Text: "🔗 مشاهده پست",
