@@ -118,6 +118,7 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 			}
 
 			return &domain.AudioPayload{
+				OriginalPath:  rawPath,
 				Title:         meta.Title,
 				Performer:     meta.Artist,
 				FilePath:      fullTrackPath,
@@ -140,10 +141,11 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 
 	// Fallback response
 	return &domain.AudioPayload{
-		Title:       "Original Reel Audio",
-		Performer:   "Instagram",
-		FilePath:    rawPath,
-		IsFullTrack: false,
+		OriginalPath: rawPath,
+		Title:        "Original Reel Audio",
+		Performer:    "Instagram",
+		FilePath:     rawPath,
+		IsFullTrack:  false,
 	}, nil
 }
 

@@ -76,7 +76,14 @@ func main() {
 	// 3. Telegram Controller
 	rateLimiter := sqlite.NewRateLimitRepository(db)
 	leases := sqlite.NewLeaseRepository(db)
-	botHandler := telegram.NewProtectedBotHandler(cfg.BotToken, processReelUC, cfg.WorkerCount, cfg.QueueLimit, cfg.ChannelID, rateLimiter, leases, cfg.RateLimit, cfg.RateWindow, cfg.LeaseTTL, cfg.RequestTimeout)
+	botHandler := telegram.NewProtectedBotHandler(cfg.BotToken, processReelUC, cfg.WorkerCount, cfg.QueueLimit, cfg.ChannelID, rateLimiter, leases, cfg.RateLimit, cfg.RateWindow, cfg.LeaseTTL, cfg.RequestTimeout).
+		WithPhase2Repositories(
+			sqlite.NewUserRepository(db),
+			sqlite.NewSettingsRepository(db),
+			sqlite.NewRequestRepository(db),
+			sqlite.NewTrackRepository(db),
+			sqlite.NewFavoriteRepository(db),
+		)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

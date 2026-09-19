@@ -80,3 +80,16 @@ The bot persists its SQLite database in the `bot-data` Docker volume. It contain
 short-lived cache, request leases, and rate-limit state; temporary media remains
 in memory-backed `/tmp` and is removed after each request. Requests over the
 configured per-user or global queue limit are rejected with a retry message.
+
+## User commands
+
+- `/start` or `/help` — show supported inputs and commands.
+- `/history` — view recent processed links and media.
+- `/favorites` — view saved recognized tracks.
+- `/settings` — choose the default full-track, original-audio, or both output mode.
+- `/forget` — delete the current user's stored profile and request history.
+
+Users can send a public Instagram link or upload an audio/video file directly to
+the bot. Uploaded media is downloaded only into the request's temporary
+directory, processed through the same recognition pipeline, and removed after
+delivery.
