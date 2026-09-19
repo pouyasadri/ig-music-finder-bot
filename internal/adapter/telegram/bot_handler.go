@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"telegram-audio-bot/internal/domain"
+	"telegram-audio-bot/internal/storage/sqlite"
 	"telegram-audio-bot/internal/usecase"
 
 	"github.com/go-telegram/bot"
@@ -23,10 +24,17 @@ var (
 )
 
 type BotHandler struct {
-	token       string
-	useCase     usecase.ReelAudioUseCase
-	workerQueue chan struct{}
-	channelID   string
+	token          string
+	useCase        usecase.ReelAudioUseCase
+	workerQueue    chan struct{}
+	admissionQueue chan struct{}
+	channelID      string
+	rateLimiter    sqlite.RateLimiter
+	leases         sqlite.Lease
+	rateLimit      int
+	rateWindow     time.Duration
+	leaseTTL       time.Duration
+	requestTTL     time.Duration
 }
 
 func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, channelID string) *BotHandler {
@@ -36,6 +44,21 @@ func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, ch
 		workerQueue: make(chan struct{}, maxWorkers),
 		channelID:   channelID,
 	}
+}
+
+func NewProtectedBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers, queueLimit int, channelID string, rateLimiter sqlite.RateLimiter, leases sqlite.Lease, rateLimit int, rateWindow, leaseTTL, requestTTL time.Duration) *BotHandler {
+	h := NewBotHandler(token, uc, maxWorkers, channelID)
+	if queueLimit < 0 {
+		queueLimit = 0
+	}
+	h.admissionQueue = make(chan struct{}, maxWorkers+queueLimit)
+	h.rateLimiter = rateLimiter
+	h.leases = leases
+	h.rateLimit = rateLimit
+	h.rateWindow = rateWindow
+	h.leaseTTL = leaseTTL
+	h.requestTTL = requestTTL
+	return h
 }
 
 func (h *BotHandler) Start(ctx context.Context) error {
@@ -92,6 +115,43 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 	}
 
 	reelURL := match
+	normalizedURL := normalizeInstagramURL(reelURL)
+	if h.rateLimiter != nil {
+		allowed, err := h.rateLimiter.Allow(ctx, userID, h.rateLimit, h.rateWindow)
+		if err != nil {
+			slog.Error("rate limit check failed", "user_id", userID, "err", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "❌ خطایی در بررسی محدودیت درخواست رخ داد. لطفاً دوباره تلاش کنید."})
+			return
+		}
+		if !allowed {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "⏳ تعداد درخواست‌های شما به حد مجاز رسیده است. لطفاً کمی بعد دوباره تلاش کنید."})
+			return
+		}
+	}
+	leaseOwner := fmt.Sprintf("%d-%d", userID, time.Now().UnixNano())
+	if h.leases != nil {
+		acquired, err := h.leases.Acquire(ctx, normalizedURL, leaseOwner, h.leaseTTL)
+		if err != nil {
+			slog.Error("request lease acquisition failed", "user_id", userID, "err", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "❌ خطایی در ثبت درخواست رخ داد. لطفاً دوباره تلاش کنید."})
+			return
+		}
+		if !acquired {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "🔄 این لینک هم‌اکنون در حال پردازش است. لطفاً کمی صبر کنید."})
+			return
+		}
+	}
+	if h.admissionQueue != nil {
+		select {
+		case h.admissionQueue <- struct{}{}:
+		default:
+			if h.leases != nil {
+				_ = h.leases.Release(context.Background(), normalizedURL, leaseOwner)
+			}
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "⏳ ربات در حال حاضر شلوغ است. لطفاً کمی بعد دوباره تلاش کنید."})
+			return
+		}
+	}
 	slog.Info("processing new reel request",
 		"chat_id", chatID,
 		"user_id", userID,
@@ -105,6 +165,22 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 	})
 
 	go func() {
+		if h.admissionQueue != nil {
+			defer func() { <-h.admissionQueue }()
+		}
+		if h.leases != nil {
+			defer func() {
+				if err := h.leases.Release(context.Background(), normalizedURL, leaseOwner); err != nil {
+					slog.Warn("request lease release failed", "err", err)
+				}
+			}()
+		}
+		workCtx := ctx
+		cancel := func() {}
+		if h.requestTTL > 0 {
+			workCtx, cancel = context.WithTimeout(ctx, h.requestTTL)
+		}
+		defer cancel()
 		startTime := time.Now()
 
 		if len(h.workerQueue) == cap(h.workerQueue) {
@@ -129,7 +205,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 
 		// Start periodic chat action ticker (pulse upload_document every 4s)
 		stopChatAction := make(chan struct{})
-		go h.keepChatActionActive(ctx, b, chatID, stopChatAction)
+		go h.keepChatActionActive(workCtx, b, chatID, stopChatAction)
 		defer close(stopChatAction)
 
 		progressCb := func(msg string) {
@@ -141,7 +217,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		}
 
 		// Execute business usecase
-		payload, err := h.useCase.Execute(ctx, workDir, reelURL, progressCb)
+		payload, err := h.useCase.Execute(workCtx, workDir, reelURL, progressCb)
 		if err != nil {
 			slog.Error("failed to process reel audio", "chat_id", chatID, "err", err, "url", reelURL)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
@@ -253,6 +329,14 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			"total_ms", time.Since(startTime).Milliseconds(),
 		)
 	}()
+}
+
+func normalizeInstagramURL(raw string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if index := strings.IndexByte(normalized, '?'); index >= 0 {
+		normalized = normalized[:index]
+	}
+	return strings.ToLower(normalized)
 }
 
 func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL string) *models.InlineKeyboardMarkup {

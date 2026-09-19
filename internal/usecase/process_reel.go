@@ -2,8 +2,10 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"telegram-audio-bot/internal/domain"
@@ -14,6 +16,15 @@ type processReelUseCase struct {
 	recognizer    MusicRecognizer
 	urlRecognizer URLMusicRecognizer
 	downloader    MusicDownloader
+	cache         MetadataCache
+	cacheTTL      time.Duration
+}
+
+func NewCachedProcessReelUseCase(e MediaExtractor, r MusicRecognizer, u URLMusicRecognizer, d MusicDownloader, cache MetadataCache, cacheTTL time.Duration) ReelAudioUseCase {
+	uc := NewProcessReelUseCase(e, r, u, d).(*processReelUseCase)
+	uc.cache = cache
+	uc.cacheTTL = cacheTTL
+	return uc
 }
 
 func NewProcessReelUseCase(e MediaExtractor, r MusicRecognizer, u URLMusicRecognizer, d MusicDownloader) ReelAudioUseCase {
@@ -41,7 +52,20 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		progressCb("🎵 در حال تشخیص آهنگ...")
 	}
 	t1 := time.Now()
-	meta, err := uc.recognizer.Identify(ctx, snippetPath)
+	var meta *domain.TrackMetadata
+	cacheKey := normalizeURL(reelURL)
+	if uc.cache != nil {
+		if cached, cacheErr := uc.cache.Get(ctx, cacheKey); cacheErr == nil {
+			var cachedMeta domain.TrackMetadata
+			if jsonErr := json.Unmarshal(cached, &cachedMeta); jsonErr == nil && cachedMeta.IsMatched {
+				meta = &cachedMeta
+				slog.Info("recognition metadata cache hit", "key", cacheKey)
+			}
+		}
+	}
+	if meta == nil {
+		meta, err = uc.recognizer.Identify(ctx, snippetPath)
+	}
 	recognizeMs := time.Since(t1).Milliseconds()
 
 	// Tier 4 fallback if primary recognizers miss
@@ -59,9 +83,17 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 	}
 
 	if err == nil && meta != nil && meta.IsMatched {
+		if uc.cache != nil {
+			if encoded, marshalErr := json.Marshal(meta); marshalErr == nil {
+				if cacheErr := uc.cache.Set(ctx, cacheKey, encoded, time.Now().Add(uc.cacheTTL)); cacheErr != nil {
+					slog.Warn("failed to cache recognition metadata", "err", cacheErr)
+				}
+			}
+		}
 		if progressCb != nil {
 			progressCb(fmt.Sprintf("✅ آهنگ پیدا شد: %s\n⬇️ در حال دانلود کیفیت بالا...", meta.Title))
 		}
+
 		slog.Info("track recognized", "title", meta.Title, "artist", meta.Artist, "extract_ms", extractMs, "recognize_ms", recognizeMs)
 
 		downloadTarget := fmt.Sprintf("%s %s", meta.Title, meta.Artist)
@@ -96,6 +128,7 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 				YouTubeURL:    meta.YouTubeURL,
 			}, nil
 		}
+
 		slog.Warn("download failed, falling back to raw reel audio", "download_ms", downloadMs, "err", err)
 	} else {
 		slog.Info("unrecognized sound, using raw reel audio", "extract_ms", extractMs, "recognize_ms", recognizeMs)
@@ -112,4 +145,12 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		FilePath:    rawPath,
 		IsFullTrack: false,
 	}, nil
+}
+
+func normalizeURL(raw string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if index := strings.IndexByte(normalized, '?'); index >= 0 {
+		normalized = normalized[:index]
+	}
+	return strings.ToLower(normalized)
 }

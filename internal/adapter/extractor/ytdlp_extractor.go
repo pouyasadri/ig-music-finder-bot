@@ -58,10 +58,20 @@ func (e *YtDlpExtractor) ExtractReel(ctx context.Context, targetDir, url string)
 		return "", "", fmt.Errorf("failed to locate extracted raw audio in %s", targetDir)
 	}
 	rawPath := matches[0]
+	rawInfo, err := os.Stat(rawPath)
+	if err != nil || rawInfo.IsDir() || rawInfo.Size() == 0 {
+		return "", "", fmt.Errorf("extracted media is empty or unavailable: %s", rawPath)
+	}
 
 	// Create 10s audio snippet using fast seek for ACRCloud fingerprinting (only converts 10s)
 	ffCmd := exec.CommandContext(extractCtx, "ffmpeg", "-y", "-ss", "0", "-t", "10", "-i", rawPath, "-vn", "-acodec", "libmp3lame", "-q:a", "4", snippetPath)
-	_ = ffCmd.Run()
+	if out, err := ffCmd.CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("failed to create recognition snippet: %w (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+	snippetInfo, err := os.Stat(snippetPath)
+	if err != nil || snippetInfo.IsDir() || snippetInfo.Size() == 0 {
+		return "", "", fmt.Errorf("recognition snippet is empty or unavailable: %s", snippetPath)
+	}
 
 	return rawPath, snippetPath, nil
 }

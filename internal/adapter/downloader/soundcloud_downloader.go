@@ -62,6 +62,10 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 	} else {
 		return "", "", 0, fmt.Errorf("audio file not written: %w", err)
 	}
+	duration, err := validateAudioFile(audioPath, 49*1024*1024)
+	if err != nil {
+		return "", "", 0, err
+	}
 
 	// Look for extracted thumbnail jpg
 	thumbnailPath := filepath.Join(targetDir, "track.jpg")
@@ -74,6 +78,7 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 			thumbnailPath = ""
 		}
 	}
+	thumbnailPath = validateThumbnail(thumbnailPath)
 
-	return audioPath, thumbnailPath, 0, nil
+	return audioPath, thumbnailPath, duration, nil
 }
