@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -14,6 +14,8 @@ import (
 	"telegram-audio-bot/internal/adapter/extractor"
 	"telegram-audio-bot/internal/adapter/recognizer"
 	"telegram-audio-bot/internal/adapter/telegram"
+	"telegram-audio-bot/internal/config"
+	"telegram-audio-bot/internal/storage/sqlite"
 	"telegram-audio-bot/internal/usecase"
 )
 
@@ -24,35 +26,34 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	acrHost := os.Getenv("ACR_HOST")
-	acrKey := os.Getenv("ACR_KEY")
-	acrSecret := os.Getenv("ACR_SECRET")
-	cookiesPath := os.Getenv("COOKIES_PATH")
-	if cookiesPath == "" {
-		cookiesPath = "/app/cookies.txt"
-	}
-
-	if botToken == "" || acrHost == "" || acrKey == "" || acrSecret == "" {
-		slog.Error("Missing required environment variables (TELEGRAM_BOT_TOKEN, ACR_HOST, ACR_KEY, ACR_SECRET)")
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("invalid configuration", "err", err)
 		os.Exit(1)
 	}
+	if err := os.MkdirAll(filepath.Dir(cfg.DatabasePath), 0755); err != nil {
+		slog.Error("failed to create database directory", "err", err)
+		os.Exit(1)
+	}
+	ctx := context.Background()
+	db, err := sqlite.Open(ctx, cfg.DatabasePath)
+	if err != nil {
+		slog.Error("failed to open sqlite database", "err", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	slog.Info("configuration loaded", "worker_count", cfg.WorkerCount, "database_path", cfg.DatabasePath, "rate_limit", cfg.RateLimit)
 
 	slog.Info("Initializing bot components and adapters")
 
 	// 1. Adapters
-	mediaExtractor := extractor.NewYtDlpExtractor(cookiesPath)
+	mediaExtractor := extractor.NewYtDlpExtractor(cfg.CookiesPath)
 
-	acrRecognizer := recognizer.NewACRCloudRecognizer(acrHost, acrKey, acrSecret)
+	acrRecognizer := recognizer.NewACRCloudRecognizer(cfg.ACRHost, cfg.ACRKey, cfg.ACRSecret)
 
-	shazamScriptPath := os.Getenv("SHAZAM_SCRIPT_PATH")
-	if shazamScriptPath == "" {
-		shazamScriptPath = "/app/scripts/shazam_recognize.py"
-	}
-	shazamRecognizer := recognizer.NewShazamIORecognizer(shazamScriptPath)
+	shazamRecognizer := recognizer.NewShazamIORecognizer(cfg.ShazamScriptPath)
 
-	auddToken := os.Getenv("AUDD_API_TOKEN")
-	auddRecognizer := recognizer.NewAudDRecognizer(auddToken, &http.Client{Timeout: 5 * time.Second})
+	auddRecognizer := recognizer.NewAudDRecognizer(cfg.AuddToken, &http.Client{Timeout: 5 * time.Second})
 
 	compositeRecognizer := recognizer.NewFallbackRecognizer(
 		recognizer.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
@@ -60,7 +61,7 @@ func main() {
 		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 	)
 
-	platformRecognizer := recognizer.NewPlatformScraperRecognizer(cookiesPath)
+	platformRecognizer := recognizer.NewPlatformScraperRecognizer(cfg.CookiesPath)
 	soundCloudDownloader := downloader.NewSoundCloudDownloader()
 	youTubeDownloader := downloader.NewYouTubeDownloader()
 	musicDownloader := downloader.NewFallbackDownloader(
@@ -68,20 +69,21 @@ func main() {
 		downloader.NamedDownloader{Name: "YouTube", Downloader: youTubeDownloader},
 	)
 
-	// 2. Use Cases
-	processReelUC := usecase.NewProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader)
-	processSoundCloudUC := usecase.NewProcessSoundCloudUseCase(soundCloudDownloader)
-
-	workerCount := 5
-	if wcStr := os.Getenv("WORKER_COUNT"); wcStr != "" {
-		if wc, err := strconv.Atoi(wcStr); err == nil && wc > 0 {
-			workerCount = wc
-		}
-	}
+	// 2. Use Case
+	metadataCache := sqlite.NewMetadataCacheAdapter(sqlite.NewCacheRepository(db))
+	processReelUC := usecase.NewCachedProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader, metadataCache, cfg.CacheTTL)
 
 	// 3. Telegram Controller
-	channelID := os.Getenv("CHANNEL_ID")
-	botHandler := telegram.NewBotHandler(botToken, processReelUC, processSoundCloudUC, workerCount, channelID)
+	rateLimiter := sqlite.NewRateLimitRepository(db)
+	leases := sqlite.NewLeaseRepository(db)
+	botHandler := telegram.NewProtectedBotHandler(cfg.BotToken, processReelUC, cfg.WorkerCount, cfg.QueueLimit, cfg.ChannelID, rateLimiter, leases, cfg.RateLimit, cfg.RateWindow, cfg.LeaseTTL, cfg.RequestTimeout).
+		WithPhase2Repositories(
+			sqlite.NewUserRepository(db),
+			sqlite.NewSettingsRepository(db),
+			sqlite.NewRequestRepository(db),
+			sqlite.NewTrackRepository(db),
+			sqlite.NewFavoriteRepository(db),
+		)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

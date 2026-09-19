@@ -10,5 +10,9 @@ services:
       - .env
     volumes:
       - ./cookies.txt:/app/cookies.txt
+      - bot-data:/app/data
     tmpfs:
       - /tmp:size=1G,mode=1777
+
+volumes:
+  bot-data:

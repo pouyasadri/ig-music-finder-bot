@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"telegram-audio-bot/internal/domain"
+	"time"
 )
 
 type MediaExtractor interface {
@@ -19,6 +20,11 @@ type URLMusicRecognizer interface {
 
 type MusicDownloader interface {
 	Download(ctx context.Context, targetDir, query string) (filePath, thumbnailPath string, duration int, err error)
+}
+
+type MetadataCache interface {
+	Get(ctx context.Context, key string) ([]byte, error)
+	Set(ctx context.Context, key string, value []byte, expiresAt time.Time) error
 }
 
 type ReelAudioUseCase interface {
