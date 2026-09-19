@@ -12,3 +12,5 @@ cookies.txt
 .DS_Store
 /tmp/
 *.log
+__pycache__/
+*.pyc
