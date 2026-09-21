@@ -88,3 +88,10 @@ type Page struct {
 	Limit  int
 	Offset int
 }
+
+// RecognitionCandidate captures a single provider match and its confidence score.
+type RecognitionCandidate struct {
+	Provider string
+	Metadata *TrackMetadata
+	Score    float64
+}
