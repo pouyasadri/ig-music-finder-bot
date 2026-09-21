@@ -22,9 +22,8 @@ import (
 )
 
 var (
-	igURLRegex         = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
-	soundCloudURLRegex = regexp.MustCompile(`https?://(?:(?:www\.|m\.)?soundcloud\.com/[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-\.]+/?|on\.soundcloud\.com/[a-zA-Z0-9_\-]+/?|soundcloud\.app\.goo\.gl/[a-zA-Z0-9_\-]+/?)(?:\?[^\s]*)?`)
-	sanitizeFilename   = regexp.MustCompile(`[<>:"/\\|?*]`)
+	igURLRegex       = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
+	sanitizeFilename = regexp.MustCompile(`[<>:"/\\|?*]`)
 )
 
 type BotHandler struct {
