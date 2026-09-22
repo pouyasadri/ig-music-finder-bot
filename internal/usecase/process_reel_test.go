@@ -26,11 +26,11 @@ func (m *mockRecognizer) Identify(ctx context.Context, snippet string) (*domain.
 }
 
 type mockDownloader struct {
-	DownloadFunc func(ctx context.Context, dir, query string) (string, string, int, error)
+	DownloadFunc func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error)
 }
 
-func (m *mockDownloader) Download(ctx context.Context, dir, query string) (string, string, int, error) {
-	return m.DownloadFunc(ctx, dir, query)
+func (m *mockDownloader) Download(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
+	return m.DownloadFunc(ctx, dir, query, expectedDuration)
 }
 
 func TestProcessReelAudio(t *testing.T) {
@@ -55,7 +55,7 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 		downloader := &mockDownloader{
-			DownloadFunc: func(ctx context.Context, dir, query string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
 				return "/tmp/full.mp3", "/tmp/cover.jpg", 210, nil
 			},
 		}
@@ -107,7 +107,7 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 		downloader := &mockDownloader{
-			DownloadFunc: func(ctx context.Context, dir, query string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
 				return "", "", 0, errors.New("yt download failed")
 			},
 		}
@@ -120,6 +120,34 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		if res.IsFullTrack || res.FilePath != "/tmp/raw.mp3" {
 			t.Errorf("expected raw fallback audio, got: %+v", res)
+		}
+	})
+
+	t.Run("fallback: short download is not sent as a full track", func(t *testing.T) {
+		extractor := &mockExtractor{
+			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
+				return "/tmp/raw.mp3", "/tmp/snippet.mp3", nil
+			},
+		}
+		recognizer := &mockRecognizer{
+			IdentifyFunc: func(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
+				return &domain.TrackMetadata{Title: "Song A", Artist: "Artist B", IsMatched: true, Duration: 240}, nil
+			},
+		}
+		downloader := &mockDownloader{
+			DownloadFunc: func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
+				return "/tmp/preview.mp3", "", 30, nil
+			},
+		}
+
+		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+
+		if err != nil {
+			t.Fatalf("expected raw fallback, got: %v", err)
+		}
+		if res.IsFullTrack || res.FilePath != "/tmp/raw.mp3" {
+			t.Errorf("expected short download to be rejected, got: %+v", res)
 		}
 	})
 
@@ -142,9 +170,9 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 		downloader := &mockDownloader{
-			DownloadFunc: func(ctx context.Context, dir, query string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
 				downloadedTarget = query
-				return "/tmp/full.mp3", "/tmp/cover.jpg", 0, nil // 0 duration to test fallback to meta.Duration
+				return "/tmp/full.mp3", "/tmp/cover.jpg", 180, nil
 			},
 		}
 

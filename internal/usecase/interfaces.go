@@ -19,7 +19,7 @@ type URLMusicRecognizer interface {
 }
 
 type MusicDownloader interface {
-	Download(ctx context.Context, targetDir, query string) (filePath, thumbnailPath string, duration int, err error)
+	Download(ctx context.Context, targetDir, query string, expectedDuration int) (filePath, thumbnailPath string, duration int, err error)
 }
 
 type MetadataCache interface {

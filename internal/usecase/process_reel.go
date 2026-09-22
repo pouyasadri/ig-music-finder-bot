@@ -102,10 +102,10 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		}
 
 		t2 := time.Now()
-		fullTrackPath, thumbnailPath, duration, err := uc.downloader.Download(ctx, targetDir, downloadTarget)
+		fullTrackPath, thumbnailPath, duration, err := uc.downloader.Download(ctx, targetDir, downloadTarget, meta.Duration)
 		downloadMs := time.Since(t2).Milliseconds()
 
-		if err == nil && fullTrackPath != "" {
+		if err == nil && fullTrackPath != "" && downloadedDurationMatches(duration, meta.Duration) {
 			slog.Info("download completed", "download_ms", downloadMs, "target", downloadTarget)
 
 			finalDuration := duration
@@ -130,6 +130,9 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 			}, nil
 		}
 
+		if err == nil {
+			err = fmt.Errorf("downloaded track duration is not compatible with recognized track: actual=%ds expected=%ds", duration, meta.Duration)
+		}
 		slog.Warn("download failed, falling back to raw reel audio", "download_ms", downloadMs, "err", err)
 	} else {
 		slog.Info("unrecognized sound, using raw reel audio", "extract_ms", extractMs, "recognize_ms", recognizeMs)
@@ -147,6 +150,20 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		FilePath:     rawPath,
 		IsFullTrack:  false,
 	}, nil
+}
+
+func downloadedDurationMatches(actual, expected int) bool {
+	if actual <= 0 {
+		return false
+	}
+	if expected <= 0 {
+		return actual >= 60
+	}
+	tolerance := expected / 10
+	if tolerance < 10 {
+		tolerance = 10
+	}
+	return actual+tolerance >= expected && actual <= expected+tolerance*3
 }
 
 func normalizeURL(raw string) string {

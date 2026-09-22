@@ -9,11 +9,11 @@ import (
 )
 
 type mockMusicDownloader struct {
-	DownloadFunc func(ctx context.Context, targetDir, target string) (string, string, int, error)
+	DownloadFunc func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error)
 }
 
-func (m *mockMusicDownloader) Download(ctx context.Context, targetDir, target string) (string, string, int, error) {
-	return m.DownloadFunc(ctx, targetDir, target)
+func (m *mockMusicDownloader) Download(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
+	return m.DownloadFunc(ctx, targetDir, target, expectedDuration)
 }
 
 func TestFallbackDownloader(t *testing.T) {
@@ -22,12 +22,12 @@ func TestFallbackDownloader(t *testing.T) {
 	t.Run("primary succeeds, fallback not called", func(t *testing.T) {
 		fallbackCalled := false
 		primary := &mockMusicDownloader{
-			DownloadFunc: func(ctx context.Context, targetDir, target string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 				return "/tmp/sc_track.mp3", "/tmp/sc_thumb.jpg", 180, nil
 			},
 		}
 		secondary := &mockMusicDownloader{
-			DownloadFunc: func(ctx context.Context, targetDir, target string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 				fallbackCalled = true
 				return "/tmp/yt_track.mp3", "/tmp/yt_thumb.jpg", 180, nil
 			},
@@ -38,7 +38,7 @@ func TestFallbackDownloader(t *testing.T) {
 			downloader.NamedDownloader{Name: "YouTube", Downloader: secondary},
 		)
 
-		audio, thumb, dur, err := fb.Download(ctx, "/tmp", "Artist Song")
+		audio, thumb, dur, err := fb.Download(ctx, "/tmp", "Artist Song", 180)
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
@@ -52,12 +52,12 @@ func TestFallbackDownloader(t *testing.T) {
 
 	t.Run("primary fails, fallback succeeds", func(t *testing.T) {
 		primary := &mockMusicDownloader{
-			DownloadFunc: func(ctx context.Context, targetDir, target string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 				return "", "", 0, errors.New("soundcloud 404")
 			},
 		}
 		secondary := &mockMusicDownloader{
-			DownloadFunc: func(ctx context.Context, targetDir, target string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 				return "/tmp/yt_track.mp3", "/tmp/yt_thumb.jpg", 200, nil
 			},
 		}
@@ -67,7 +67,7 @@ func TestFallbackDownloader(t *testing.T) {
 			downloader.NamedDownloader{Name: "YouTube", Downloader: secondary},
 		)
 
-		audio, thumb, dur, err := fb.Download(ctx, "/tmp", "Artist Song")
+		audio, thumb, dur, err := fb.Download(ctx, "/tmp", "Artist Song", 180)
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
@@ -78,12 +78,12 @@ func TestFallbackDownloader(t *testing.T) {
 
 	t.Run("all downloaders fail", func(t *testing.T) {
 		primary := &mockMusicDownloader{
-			DownloadFunc: func(ctx context.Context, targetDir, target string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 				return "", "", 0, errors.New("sc err")
 			},
 		}
 		secondary := &mockMusicDownloader{
-			DownloadFunc: func(ctx context.Context, targetDir, target string) (string, string, int, error) {
+			DownloadFunc: func(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 				return "", "", 0, errors.New("yt err")
 			},
 		}
@@ -93,7 +93,7 @@ func TestFallbackDownloader(t *testing.T) {
 			downloader.NamedDownloader{Name: "YouTube", Downloader: secondary},
 		)
 
-		_, _, _, err := fb.Download(ctx, "/tmp", "Artist Song")
+		_, _, _, err := fb.Download(ctx, "/tmp", "Artist Song", 180)
 		if err == nil {
 			t.Fatalf("expected error when all downloaders fail")
 		}
