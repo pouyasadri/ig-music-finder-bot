@@ -93,3 +93,12 @@ Users can send a public Instagram link or upload an audio/video file directly to
 the bot. Uploaded media is downloaded only into the request's temporary
 directory, processed through the same recognition pipeline, and removed after
 delivery.
+
+## Telegram UX
+
+The bot provides keyboard-first navigation from `/start` and `/help`, including
+quick access to history, favorites, settings, and help. History and favorites
+use paginated views, while settings expose the output mode with inline controls.
+Callbacks use user-scoped IDs and short-lived action data where persisted state is
+required. Processing and error messages are localized in Persian and keep
+technical details in structured logs.

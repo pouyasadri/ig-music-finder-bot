@@ -345,9 +345,32 @@ func (r *SQLiteFavoriteRepository) Delete(ctx context.Context, uid, tid int64) e
 	}
 	return e
 }
+func (r *SQLiteFavoriteRepository) ListEnrichedByUser(ctx context.Context, uid int64, p domain.Page) ([]domain.FavoriteTrack, error) {
+	l, o := page(p)
+	rows, e := r.db.QueryContext(ctx, `SELECT f.user_id,f.track_id,f.created_at,t.id,t.title,t.artist,t.duration,t.spotify_url,t.youtube_url,t.created_at FROM favorites f JOIN tracks t ON t.id=f.track_id WHERE f.user_id=? ORDER BY f.created_at DESC,f.track_id DESC LIMIT ? OFFSET ?`, uid, l, o)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []domain.FavoriteTrack{}
+	for rows.Next() {
+		var v domain.FavoriteTrack
+		var fc, tc int64
+		if e = rows.Scan(&v.Favorite.UserID, &v.Favorite.TrackID, &fc, &v.Track.ID, &v.Track.Title, &v.Track.Artist, &v.Track.Duration, &v.Track.SpotifyURL, &v.Track.YouTubeURL, &tc); e != nil {
+			return nil, e
+		}
+		v.Favorite.CreatedAt = fromNanos(fc)
+		v.Track.CreatedAt = fromNanos(tc)
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
 func (r *SQLiteFavoriteRepository) DeleteForUser(ctx context.Context, uid int64) error {
 	_, e := r.db.ExecContext(ctx, `DELETE FROM favorites WHERE user_id=?`, uid)
 	return e
+}
+func (r *SQLiteFavoriteRepository) DeleteAll(ctx context.Context, uid int64) error {
+	return r.DeleteForUser(ctx, uid)
 }
 
 type SQLitePendingCallbackRepository struct{ db *sql.DB }

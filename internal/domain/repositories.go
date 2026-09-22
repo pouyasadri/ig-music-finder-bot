@@ -37,9 +37,16 @@ type TrackRepository interface {
 type FavoriteRepository interface {
 	Add(context.Context, Favorite) error
 	ListByUser(context.Context, int64, Page) ([]Favorite, error)
+	ListEnrichedByUser(context.Context, int64, Page) ([]FavoriteTrack, error)
 	Exists(context.Context, int64, int64) (bool, error)
 	Delete(context.Context, int64, int64) error
 	DeleteForUser(context.Context, int64) error
+	DeleteAll(context.Context, int64) error
+}
+
+type FavoriteTrack struct {
+	Favorite Favorite
+	Track    Track
 }
 
 type PendingCallbackRepository interface {
