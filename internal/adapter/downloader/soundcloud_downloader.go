@@ -9,16 +9,30 @@ import (
 	"strings"
 	"time"
 
-	"telegram-audio-bot/internal/usecase"
+	"telegram-audio-bot/internal/domain"
 )
 
 type SoundCloudDownloader struct{}
 
-func NewSoundCloudDownloader() usecase.MusicDownloader {
+func NewSoundCloudDownloader() *SoundCloudDownloader {
 	return &SoundCloudDownloader{}
 }
 
-func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target string) (string, string, int, error) {
+func (d *SoundCloudDownloader) DownloadTrack(ctx context.Context, targetDir, url string) (*domain.AudioPayload, error) {
+	filePath, thumbnailPath, duration, err := d.Download(ctx, targetDir, url, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.AudioPayload{
+		FilePath:      filePath,
+		ThumbnailPath: thumbnailPath,
+		Duration:      duration,
+		IsFullTrack:   true,
+		SoundCloudURL: url,
+	}, nil
+}
+
+func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 	outputTemplate := filepath.Join(targetDir, "track.%(ext)s")
 	audioPath := filepath.Join(targetDir, "track.mp3")
 
@@ -65,6 +79,9 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 	duration, err := validateAudioFile(audioPath, 49*1024*1024)
 	if err != nil {
 		return "", "", 0, err
+	}
+	if err := validateTrackDuration(duration, expectedDuration); err != nil {
+		return "", "", 0, fmt.Errorf("soundcloud result rejected: %w", err)
 	}
 
 	// Look for extracted thumbnail jpg
