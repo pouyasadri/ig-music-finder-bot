@@ -99,14 +99,3 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 
 	return audioPath, thumbnailPath, duration, nil
 }
-
-func (d *SoundCloudDownloader) DownloadTrack(ctx context.Context, targetDir, url string) (*domain.AudioPayload, error) {
-	audioPath, thumbnailPath, duration, err := d.Download(ctx, targetDir, url)
-	if err != nil {
-		return nil, err
-	}
-	return &domain.AudioPayload{
-		FilePath: audioPath, ThumbnailPath: thumbnailPath, Duration: duration,
-		Title: "SoundCloud Audio", Performer: "SoundCloud", SoundCloudURL: url, IsFullTrack: true,
-	}, nil
-}
