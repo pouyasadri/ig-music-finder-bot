@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"telegram-audio-bot/internal/usecase"
+	"telegram-audio-bot/internal/domain"
 )
 
 type SoundCloudDownloader struct{}
 
-func NewSoundCloudDownloader() usecase.MusicDownloader {
+func NewSoundCloudDownloader() *SoundCloudDownloader {
 	return &SoundCloudDownloader{}
 }
 
@@ -81,4 +81,15 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 	thumbnailPath = validateThumbnail(thumbnailPath)
 
 	return audioPath, thumbnailPath, duration, nil
+}
+
+func (d *SoundCloudDownloader) DownloadTrack(ctx context.Context, targetDir, url string) (*domain.AudioPayload, error) {
+	audioPath, thumbnailPath, duration, err := d.Download(ctx, targetDir, url)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.AudioPayload{
+		FilePath: audioPath, ThumbnailPath: thumbnailPath, Duration: duration,
+		Title: "SoundCloud Audio", Performer: "SoundCloud", SoundCloudURL: url, IsFullTrack: true,
+	}, nil
 }
