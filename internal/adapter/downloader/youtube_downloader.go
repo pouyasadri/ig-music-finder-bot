@@ -18,7 +18,7 @@ func NewYouTubeDownloader() usecase.MusicDownloader {
 	return &YouTubeDownloader{}
 }
 
-func (d *YouTubeDownloader) Download(ctx context.Context, targetDir, target string) (string, string, int, error) {
+func (d *YouTubeDownloader) Download(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
 	// Clean output template for audio and thumbnail
 	outputTemplate := filepath.Join(targetDir, "track.%(ext)s")
 	audioPath := filepath.Join(targetDir, "track.mp3")
@@ -61,6 +61,9 @@ func (d *YouTubeDownloader) Download(ctx context.Context, targetDir, target stri
 	duration, err := validateAudioFile(audioPath, 49*1024*1024)
 	if err != nil {
 		return "", "", 0, err
+	}
+	if err := validateTrackDuration(duration, expectedDuration); err != nil {
+		return "", "", 0, fmt.Errorf("youtube result rejected: %w", err)
 	}
 
 	// Look for extracted thumbnail jpg

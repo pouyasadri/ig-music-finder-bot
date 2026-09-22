@@ -22,8 +22,8 @@ import (
 )
 
 var (
-	soundCloudURLRegex = regexp.MustCompile(`https?://(?:www\.)?(?:soundcloud\.com|m\.soundcloud\.com|on\.soundcloud\.com|soundcloud\.app\.goo\.gl)/[^\s]+`)
 	igURLRegex         = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
+	soundCloudURLRegex = regexp.MustCompile(`https?://(?:www\.|m\.)?(?:soundcloud\.com|on\.soundcloud\.com|soundcloud\.app\.goo\.gl)/[^\s]+`)
 	sanitizeFilename   = regexp.MustCompile(`[<>:"/\\|?*]`)
 )
 
@@ -81,12 +81,6 @@ func (h *BotHandler) Start(ctx context.Context) error {
 		bot.WithCallbackQueryDataHandler("send_to_channel", bot.MatchTypeExact, h.handleSendToChannel),
 		bot.WithCallbackQueryDataHandler("settings_mode_", bot.MatchTypePrefix, h.handleSettingsMode),
 		bot.WithCallbackQueryDataHandler("favorite_track_", bot.MatchTypePrefix, h.handleFavoriteTrack),
-		bot.WithCallbackQueryDataHandler("menu:home", bot.MatchTypeExact, h.handleMenuHome),
-		bot.WithCallbackQueryDataHandler("menu:help", bot.MatchTypeExact, h.handleMenuHelp),
-		bot.WithCallbackQueryDataHandler("menu:history:", bot.MatchTypePrefix, h.handleMenuHistory),
-		bot.WithCallbackQueryDataHandler("menu:favorites:", bot.MatchTypePrefix, h.handleMenuFavorites),
-		bot.WithCallbackQueryDataHandler("menu:settings", bot.MatchTypeExact, h.handleMenuSettings),
-		bot.WithCallbackQueryDataHandler("settings:output:", bot.MatchTypePrefix, h.handleOutputSetting),
 	}
 	b, err := bot.New(h.token, opts...)
 	if err != nil {
@@ -96,83 +90,6 @@ func (h *BotHandler) Start(ctx context.Context) error {
 	slog.Info("Telegram Bot started listening for messages")
 	b.Start(ctx)
 	return nil
-}
-
-func (h *BotHandler) handleMenuHome(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.CallbackQuery == nil {
-		return
-	}
-	SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "", false)
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: update.CallbackQuery.Message.Message.Chat.ID, Text: "🏠 منوی اصلی", ReplyMarkup: HomeKeyboard()})
-}
-
-func (h *BotHandler) handleMenuHelp(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.CallbackQuery == nil {
-		return
-	}
-	SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "", false)
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: update.CallbackQuery.Message.Message.Chat.ID, Text: "❓ راهنما\n\nیک لینک عمومی اینستاگرام یا ساندکلاد بفرست، یا فایل صوتی/ویدیویی آپلود کن.\n\nبعد از پردازش می‌توانی آهنگ را ذخیره کنی، دوباره دانلود کنی یا صدای اصلی را دریافت کنی.", ReplyMarkup: HomeKeyboard()})
-}
-
-func (h *BotHandler) handleMenuHistory(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.CallbackQuery == nil {
-		return
-	}
-	page, err := ExtractPageFromCallback(update.CallbackQuery.Data, "menu:history:")
-	if err != nil {
-		SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "صفحه نامعتبر است.", true)
-		return
-	}
-	SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "", false)
-	h.sendHistory(ctx, b, update.CallbackQuery.Message.Message.Chat.ID, update.CallbackQuery.From.ID, page*10)
-}
-
-func (h *BotHandler) handleMenuFavorites(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.CallbackQuery == nil {
-		return
-	}
-	page, err := ExtractPageFromCallback(update.CallbackQuery.Data, "menu:favorites:")
-	if err != nil {
-		SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "صفحه نامعتبر است.", true)
-		return
-	}
-	SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "", false)
-	h.sendFavorites(ctx, b, update.CallbackQuery.Message.Message.Chat.ID, update.CallbackQuery.From.ID, page*10)
-}
-
-func (h *BotHandler) handleMenuSettings(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.CallbackQuery == nil {
-		return
-	}
-	SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "", false)
-	h.sendSettings(ctx, b, update.CallbackQuery.Message.Message.Chat.ID, update.CallbackQuery.From.ID)
-}
-
-func (h *BotHandler) handleOutputSetting(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.CallbackQuery == nil || h.users == nil || h.settings == nil {
-		return
-	}
-	mode, ok := ParseCallbackData(update.CallbackQuery.Data, "settings:output:")
-	if !ok || (mode != "full" && mode != "original" && mode != "both") {
-		SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "تنظیم نامعتبر است.", true)
-		return
-	}
-	user := h.ensureUser(ctx, &update.CallbackQuery.From)
-	if user == nil {
-		SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "خطا در شناسایی کاربر.", true)
-		return
-	}
-	settings, err := h.settings.Get(ctx, user.ID)
-	if err != nil {
-		settings = &domain.UserSettings{UserID: user.ID, KeepHistory: true}
-	}
-	settings.OutputMode = mode
-	if err := h.settings.Upsert(ctx, settings); err != nil {
-		SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "ذخیره تنظیمات انجام نشد.", true)
-		return
-	}
-	SafeAnswerCallback(ctx, b, update.CallbackQuery.ID, "تنظیمات ذخیره شد ✅", false)
-	h.sendSettings(ctx, b, update.CallbackQuery.Message.Message.Chat.ID, update.CallbackQuery.From.ID)
 }
 
 func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -201,12 +118,17 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 
 	// Handle /start or /help
 	if text == "/start" || text == "/help" {
-		kb := HomeKeyboard()
+		kb := &models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{
+				{
+					{Text: "اشتراک‌گذاری ربات 🚀", URL: "https://t.me/share/url?url=&text=این+ربات+برای+دانلود+آهنگ+های+اینستاگرام+عالیه!+🎧"},
+				},
+			},
+		}
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text: "سلام! 👋 خوش اومدی.\n\n" +
-				"لینک اینستاگرام، ساندکلاد یا فایل صوتی‌ات را بفرست تا آهنگ را پیدا و آماده کنم 🎧\n\n" +
-				"از دکمه‌های زیر برای دسترسی سریع به تاریخچه، ذخیره‌ها و تنظیمات استفاده کن.",
+				"فقط کافیه لینک ریلز یا پست اینستاگرام رو برام بفرستی تا آهنگش رو برات پیدا کنم و با کیفیت عالی تحویلت بدم 🎧",
 			ReplyMarkup: kb,
 		})
 		return
@@ -581,14 +503,9 @@ func (h *BotHandler) sendHistory(ctx context.Context, b *bot.Bot, chatID, telegr
 	var lines strings.Builder
 	lines.WriteString("📚 تاریخچه درخواست‌ها:\n\n")
 	for i, item := range items {
-		lines.WriteString(fmt.Sprintf("%d. %s %s\n   %s\n", offset+i+1, SourceTypeEmoji(SourceTypeFromURL(item.URL)), RequestLabel(item.Status), item.URL))
+		lines.WriteString(fmt.Sprintf("%d. %s — %s\n", offset+i+1, requestLabel(item), item.URL))
 	}
-	pageNumber := offset / 10
-	totalPages := pageNumber + 1
-	if len(items) == 10 {
-		totalPages++
-	}
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: lines.String(), ReplyMarkup: PaginationKeyboard("menu:history", pageNumber, totalPages)})
+	h.sendMessage(ctx, b, chatID, lines.String())
 }
 
 func (h *BotHandler) sendFavorites(ctx context.Context, b *bot.Bot, chatID, telegramID int64, offset int) {
@@ -601,22 +518,17 @@ func (h *BotHandler) sendFavorites(ctx context.Context, b *bot.Bot, chatID, tele
 		h.sendMessage(ctx, b, chatID, "❌ خطا در بارگذاری ذخیره‌ها.")
 		return
 	}
-	items, err := h.favorites.ListEnrichedByUser(ctx, user.ID, domain.Page{Limit: 10, Offset: offset})
+	items, err := h.favorites.ListByUser(ctx, user.ID, domain.Page{Limit: 10, Offset: offset})
 	if err != nil || len(items) == 0 {
-		h.sendMessage(ctx, b, chatID, "❤️ هنوز آهنگی ذخیره نکرده‌اید.\n\nبعد از دریافت هر آهنگ، روی دکمه ذخیره بزنید تا اینجا نگه‌داری شود.")
+		h.sendMessage(ctx, b, chatID, "❤️ آهنگ ذخیره‌شده‌ای وجود ندارد.")
 		return
 	}
 	var lines strings.Builder
 	lines.WriteString("❤️ آهنگ‌های ذخیره‌شده:\n\n")
 	for i, item := range items {
-		lines.WriteString(fmt.Sprintf("%d. %s\n", offset+i+1, FormatTrackInfo(item.Track.Title, item.Track.Artist, item.Track.Duration)))
+		lines.WriteString(fmt.Sprintf("%d. track #%d\n", offset+i+1, item.TrackID))
 	}
-	pageNumber := offset / 10
-	totalPages := pageNumber + 1
-	if len(items) == 10 {
-		totalPages++
-	}
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: lines.String(), ReplyMarkup: PaginationKeyboard("menu:favorites", pageNumber, totalPages)})
+	h.sendMessage(ctx, b, chatID, lines.String())
 }
 
 func (h *BotHandler) sendSettings(ctx context.Context, b *bot.Bot, chatID, telegramID int64) {

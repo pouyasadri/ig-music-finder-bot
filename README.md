@@ -6,7 +6,7 @@ An open-access Telegram bot written in Go following Clean Architecture and Test-
 1. **Reel Extraction**: Receives Instagram Reel links (`https://www.instagram.com/reel/...` or `/p/...`) and extracts audio snippets using `yt-dlp` and `ffmpeg`.
 2. **Music Recognition**: Fingerprints and identifies audio using the **ACRCloud** API.
 3. **High-Quality Full Track**: If recognized, searches YouTube and downloads the highest quality MP3 with embedded metadata.
-4. **Fallback Handling**: If unrecognized or if YouTube download fails, seamlessly falls back to sending the original Reel audio snippet.
+4. **Validated Provider Fallback**: Searches SoundCloud and YouTube, rejects short previews or duration-mismatched files, and falls back to the original Reel audio when no complete track is available.
 5. **Concurrency Control**: Bounded worker pool (max 2 parallel workers) to protect VPS resources and prevent rate limits.
 6. **Strict Lifecycle Cleanup**: Every request creates an isolated temporary directory and guarantees cleanup via `defer os.RemoveAll(...)`.
 
@@ -80,6 +80,11 @@ The bot persists its SQLite database in the `bot-data` Docker volume. It contain
 short-lived cache, request leases, and rate-limit state; temporary media remains
 in memory-backed `/tmp` and is removed after each request. Requests over the
 configured per-user or global queue limit are rejected with a retry message.
+
+Downloaded tracks are accepted only when `ffprobe` can read their duration and
+that duration is compatible with the recognized track. Provider attempts use
+isolated temporary directories, so a rejected SoundCloud preview cannot be
+mistaken for a successful fallback download.
 
 ## User commands
 
