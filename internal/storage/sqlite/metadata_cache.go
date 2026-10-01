@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"time"
+
+	"telegram-audio-bot/internal/domain"
 )
 
 type MetadataCacheAdapter struct {
@@ -12,6 +14,8 @@ type MetadataCacheAdapter struct {
 func NewMetadataCacheAdapter(cache Cache) *MetadataCacheAdapter {
 	return &MetadataCacheAdapter{cache: cache}
 }
+
+var _ domain.MetadataCache = (*MetadataCacheAdapter)(nil)
 
 func (c *MetadataCacheAdapter) Get(ctx context.Context, key string) ([]byte, error) {
 	entry, err := c.cache.Get(ctx, key)

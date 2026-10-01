@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"telegram-audio-bot/internal/domain"
 )
@@ -38,7 +37,7 @@ func TestPersistenceOwnershipAndPagination(t *testing.T) {
 	}
 }
 
-func TestPendingCallbackExpiryAndFavoriteDelete(t *testing.T) {
+func TestFavoriteDelete(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
 	users := NewUserRepository(db)
@@ -61,16 +60,5 @@ func TestPendingCallbackExpiryAndFavoriteDelete(t *testing.T) {
 	}
 	if err := favorites.Delete(ctx, u.ID, tr.ID); err != nil {
 		t.Fatal(err)
-	}
-	pending := NewPendingCallbackRepository(db)
-	action := &domain.PendingCallbackAction{UserID: u.ID, Action: "send", ExpiresAt: time.Now().Add(-time.Minute)}
-	if err := pending.Create(ctx, action); err != nil {
-		t.Fatal(err)
-	}
-	if err := pending.DeleteExpired(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pending.GetByIDForUser(ctx, action.ID, u.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expired callback lookup error = %v", err)
 	}
 }

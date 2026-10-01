@@ -10,11 +10,11 @@ import (
 )
 
 type processSoundCloudUseCase struct {
-	downloader SoundCloudTrackDownloader
+	downloader domain.SoundCloudTrackDownloader
 }
 
 // NewProcessSoundCloudUseCase initializes a new SoundCloud audio use case
-func NewProcessSoundCloudUseCase(d SoundCloudTrackDownloader) SoundCloudAudioUseCase {
+func NewProcessSoundCloudUseCase(d domain.SoundCloudTrackDownloader) SoundCloudAudioUseCase {
 	return &processSoundCloudUseCase{
 		downloader: d,
 	}

@@ -102,17 +102,6 @@ CREATE TABLE IF NOT EXISTS favorites (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS pending_callback_actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    payload TEXT NOT NULL DEFAULT '',
-    expires_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS pending_callbacks_user_idx ON pending_callback_actions(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS pending_callbacks_expiry_idx ON pending_callback_actions(expires_at);
 `
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate sqlite database: %w", err)

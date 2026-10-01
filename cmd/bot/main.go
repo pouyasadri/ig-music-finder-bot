@@ -20,7 +20,6 @@ import (
 )
 
 func main() {
-	// Initialize structured slog logger
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -46,21 +45,15 @@ func main() {
 
 	slog.Info("Initializing bot components and adapters")
 
-	// 1. Adapters
 	mediaExtractor := extractor.NewYtDlpExtractor(cfg.CookiesPath)
-
 	acrRecognizer := recognizer.NewACRCloudRecognizer(cfg.ACRHost, cfg.ACRKey, cfg.ACRSecret)
-
 	shazamRecognizer := recognizer.NewShazamIORecognizer(cfg.ShazamScriptPath)
-
 	auddRecognizer := recognizer.NewAudDRecognizer(cfg.AuddToken, &http.Client{Timeout: 5 * time.Second})
-
 	compositeRecognizer := recognizer.NewFallbackRecognizer(
 		recognizer.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
 		recognizer.Engine{Name: "AudD", Recognizer: auddRecognizer, Timeout: 3 * time.Second},
 		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 	)
-
 	platformRecognizer := recognizer.NewPlatformScraperRecognizer(cfg.CookiesPath)
 	soundCloudDownloader := downloader.NewSoundCloudDownloader()
 	youTubeDownloader := downloader.NewYouTubeDownloader()
@@ -69,15 +62,15 @@ func main() {
 		downloader.NamedDownloader{Name: "YouTube", Downloader: youTubeDownloader},
 	)
 
-	// 2. Use Case
 	metadataCache := sqlite.NewMetadataCacheAdapter(sqlite.NewCacheRepository(db))
 	processReelUC := usecase.NewCachedProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader, metadataCache, cfg.CacheTTL)
+	processSoundCloudUC := usecase.NewProcessSoundCloudUseCase(soundCloudDownloader)
 
-	// 3. Telegram Controller
 	rateLimiter := sqlite.NewRateLimitRepository(db)
 	leases := sqlite.NewLeaseRepository(db)
 	botHandler := telegram.NewProtectedBotHandler(cfg.BotToken, processReelUC, cfg.WorkerCount, cfg.QueueLimit, cfg.ChannelID, rateLimiter, leases, cfg.RateLimit, cfg.RateWindow, cfg.LeaseTTL, cfg.RequestTimeout).
-		WithPhase2Repositories(
+		WithSoundCloudUseCase(processSoundCloudUC).
+		WithRepositories(
 			sqlite.NewUserRepository(db),
 			sqlite.NewSettingsRepository(db),
 			sqlite.NewRequestRepository(db),

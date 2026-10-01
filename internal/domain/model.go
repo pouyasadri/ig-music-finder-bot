@@ -75,15 +75,6 @@ type Favorite struct {
 	CreatedAt time.Time
 }
 
-type PendingCallbackAction struct {
-	ID        int64
-	UserID    int64
-	Action    string
-	Payload   string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-}
-
 type Page struct {
 	Limit  int
 	Offset int

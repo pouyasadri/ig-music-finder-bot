@@ -7,14 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"telegram-audio-bot/internal/domain"
 	"time"
-
-	"telegram-audio-bot/internal/usecase"
 )
 
 type YouTubeDownloader struct{}
 
-func NewYouTubeDownloader() usecase.MusicDownloader {
+func NewYouTubeDownloader() domain.MusicDownloader {
 	return &YouTubeDownloader{}
 }
 

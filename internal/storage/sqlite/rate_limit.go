@@ -4,22 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"telegram-audio-bot/internal/domain"
 )
-
-type RateLimiter interface {
-	Allow(ctx context.Context, userID int64, limit int, window time.Duration) (bool, error)
-	Reset(ctx context.Context, userID int64) error
-}
-
-type RateLimitRepository interface {
-	RateLimiter
-}
 
 type SQLiteRateLimitRepository struct{ db *sql.DB }
 
 func NewRateLimitRepository(db *sql.DB) *SQLiteRateLimitRepository {
 	return &SQLiteRateLimitRepository{db: db}
 }
+
+var _ domain.RateLimiter = (*SQLiteRateLimitRepository)(nil)
 
 func (r *SQLiteRateLimitRepository) Allow(ctx context.Context, userID int64, limit int, window time.Duration) (bool, error) {
 	if limit <= 0 {

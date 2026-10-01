@@ -6,20 +6,19 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-
-	"telegram-audio-bot/internal/usecase"
+	"telegram-audio-bot/internal/domain"
 )
 
 type NamedDownloader struct {
 	Name       string
-	Downloader usecase.MusicDownloader
+	Downloader domain.MusicDownloader
 }
 
 type FallbackDownloader struct {
 	downloaders []NamedDownloader
 }
 
-func NewFallbackDownloader(downloaders ...NamedDownloader) usecase.MusicDownloader {
+func NewFallbackDownloader(downloaders ...NamedDownloader) domain.MusicDownloader {
 	return &FallbackDownloader{
 		downloaders: downloaders,
 	}

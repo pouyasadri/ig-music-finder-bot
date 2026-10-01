@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"telegram-audio-bot/internal/domain"
-	"telegram-audio-bot/internal/usecase"
 )
 
 type FallbackRecognizer struct {
@@ -17,7 +16,7 @@ type FallbackRecognizer struct {
 
 var candidateKeyPattern = regexp.MustCompile(`[^a-z0-9]+`)
 
-func NewFallbackRecognizer(engines ...Engine) usecase.MusicRecognizer {
+func NewFallbackRecognizer(engines ...Engine) domain.MusicRecognizer {
 	return &FallbackRecognizer{engines: engines}
 }
 

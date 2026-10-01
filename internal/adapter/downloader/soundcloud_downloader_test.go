@@ -4,18 +4,18 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"telegram-audio-bot/internal/domain"
 	"testing"
 
 	"telegram-audio-bot/internal/adapter/downloader"
-	"telegram-audio-bot/internal/usecase"
 )
 
 func TestSoundCloudDownloaderInterfaceCompliance(t *testing.T) {
 	sc := downloader.NewSoundCloudDownloader()
 
 	// Verify compliance with both usecase interfaces
-	var _ usecase.MusicDownloader = sc
-	var _ usecase.SoundCloudTrackDownloader = sc
+	var _ domain.MusicDownloader = sc
+	var _ domain.SoundCloudTrackDownloader = sc
 }
 
 func TestSoundCloudMetadataJSONParsing(t *testing.T) {

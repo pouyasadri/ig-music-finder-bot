@@ -4,21 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"telegram-audio-bot/internal/domain"
 )
-
-type Lease interface {
-	Acquire(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
-	Renew(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
-	Release(ctx context.Context, key, owner string) error
-}
-
-type LeaseRepository interface {
-	Lease
-}
 
 type SQLiteLeaseRepository struct{ db *sql.DB }
 
 func NewLeaseRepository(db *sql.DB) *SQLiteLeaseRepository { return &SQLiteLeaseRepository{db: db} }
+
+var _ domain.Lease = (*SQLiteLeaseRepository)(nil)
 
 func (r *SQLiteLeaseRepository) Acquire(ctx context.Context, key, owner string, ttl time.Duration) (bool, error) {
 	now := time.Now()

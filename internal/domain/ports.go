@@ -1,6 +1,11 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// --- Persistence ports ---
 
 type UserRepository interface {
 	Create(context.Context, *User) error
@@ -26,8 +31,6 @@ type RequestRepository interface {
 	DeleteForUser(context.Context, int64, int64) error
 }
 
-type HistoryRepository = RequestRepository
-
 type TrackRepository interface {
 	Create(context.Context, *Track) error
 	GetByID(context.Context, int64) (*Track, error)
@@ -49,10 +52,42 @@ type FavoriteTrack struct {
 	Track    Track
 }
 
-type PendingCallbackRepository interface {
-	Create(context.Context, *PendingCallbackAction) error
-	GetByIDForUser(context.Context, int64, int64) (*PendingCallbackAction, error)
-	ListByUser(context.Context, int64, Page) ([]PendingCallbackAction, error)
-	Delete(context.Context, int64, int64) error
-	DeleteExpired(context.Context) error
+// --- Operational ports ---
+
+type RateLimiter interface {
+	Allow(ctx context.Context, userID int64, limit int, window time.Duration) (bool, error)
+	Reset(ctx context.Context, userID int64) error
+}
+
+type Lease interface {
+	Acquire(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
+	Renew(ctx context.Context, key, owner string, ttl time.Duration) (bool, error)
+	Release(ctx context.Context, key, owner string) error
+}
+
+// --- Application / media pipeline ports ---
+
+type MediaExtractor interface {
+	ExtractReel(ctx context.Context, targetDir, url string) (rawPath, snippetPath string, err error)
+}
+
+type MusicRecognizer interface {
+	Identify(ctx context.Context, snippetPath string) (*TrackMetadata, error)
+}
+
+type URLMusicRecognizer interface {
+	IdentifyByURL(ctx context.Context, url string) (*TrackMetadata, error)
+}
+
+type MusicDownloader interface {
+	Download(ctx context.Context, targetDir, query string, expectedDuration int) (filePath, thumbnailPath string, duration int, err error)
+}
+
+type MetadataCache interface {
+	Get(ctx context.Context, key string) ([]byte, error)
+	Set(ctx context.Context, key string, value []byte, expiresAt time.Time) error
+}
+
+type SoundCloudTrackDownloader interface {
+	DownloadTrack(ctx context.Context, targetDir, url string) (*AudioPayload, error)
 }

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"telegram-audio-bot/internal/domain"
-	"telegram-audio-bot/internal/storage/sqlite"
 	"telegram-audio-bot/internal/usecase"
 
 	"github.com/go-telegram/bot"
@@ -30,11 +29,12 @@ var (
 type BotHandler struct {
 	token          string
 	useCase        usecase.ReelAudioUseCase
+	soundCloudUC   usecase.SoundCloudAudioUseCase
 	workerQueue    chan struct{}
 	admissionQueue chan struct{}
 	channelID      string
-	rateLimiter    sqlite.RateLimiter
-	leases         sqlite.Lease
+	rateLimiter    domain.RateLimiter
+	leases         domain.Lease
 	rateLimit      int
 	rateWindow     time.Duration
 	leaseTTL       time.Duration
@@ -55,7 +55,7 @@ func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, ch
 	}
 }
 
-func NewProtectedBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers, queueLimit int, channelID string, rateLimiter sqlite.RateLimiter, leases sqlite.Lease, rateLimit int, rateWindow, leaseTTL, requestTTL time.Duration) *BotHandler {
+func NewProtectedBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers, queueLimit int, channelID string, rateLimiter domain.RateLimiter, leases domain.Lease, rateLimit int, rateWindow, leaseTTL, requestTTL time.Duration) *BotHandler {
 	h := NewBotHandler(token, uc, maxWorkers, channelID)
 	if queueLimit < 0 {
 		queueLimit = 0
@@ -70,8 +70,13 @@ func NewProtectedBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorker
 	return h
 }
 
-func (h *BotHandler) WithPhase2Repositories(users domain.UserRepository, settings domain.SettingsRepository, requests domain.RequestRepository, tracks domain.TrackRepository, favorites domain.FavoriteRepository) *BotHandler {
+func (h *BotHandler) WithRepositories(users domain.UserRepository, settings domain.SettingsRepository, requests domain.RequestRepository, tracks domain.TrackRepository, favorites domain.FavoriteRepository) *BotHandler {
 	h.users, h.settings, h.requests, h.tracks, h.favorites = users, settings, requests, tracks, favorites
+	return h
+}
+
+func (h *BotHandler) WithSoundCloudUseCase(uc usecase.SoundCloudAudioUseCase) *BotHandler {
+	h.soundCloudUC = uc
 	return h
 }
 
@@ -116,7 +121,6 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		return
 	}
 
-	// Handle /start or /help
 	if text == "/start" || text == "/help" {
 		kb := &models.InlineKeyboardMarkup{
 			InlineKeyboard: [][]models.InlineKeyboardButton{
@@ -128,28 +132,42 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text: "سلام! 👋 خوش اومدی.\n\n" +
-				"فقط کافیه لینک ریلز یا پست اینستاگرام رو برام بفرستی تا آهنگش رو برات پیدا کنم و با کیفیت عالی تحویلت بدم 🎧",
+				"لینک ریلز/پست اینستاگرام یا ترک ساندکلاد رو بفرست تا آهنگش رو برات پیدا کنم 🎧\n" +
+				"همچنین می‌تونی فایل صوتی یا ویدیو هم آپلود کنی.\n\n" +
+				"دستورات: /history /favorites /settings /forget",
 			ReplyMarkup: kb,
 		})
 		return
 	}
 
-	match := igURLRegex.FindString(text)
+	igMatch := igURLRegex.FindString(text)
+	scMatch := soundCloudURLRegex.FindString(text)
 	mediaID, mediaUniqueID := telegramMediaIDs(update.Message)
-	if match == "" && mediaID == "" {
+	if igMatch == "" && scMatch == "" && mediaID == "" {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
-			Text: "❌ لطفاً یک لینک معتبر ریلز یا پست اینستاگرام بفرست.\n\n" +
-				"مثال:\nhttps://www.instagram.com/reel/C-xyz123/",
+			Text: "❌ لطفاً یک لینک معتبر اینستاگرام یا ساندکلاد بفرست، یا فایل صوتی/ویدیو آپلود کن.\n\n" +
+				"مثال اینستاگرام:\nhttps://www.instagram.com/reel/C-xyz123/\n\n" +
+				"مثال ساندکلاد:\nhttps://soundcloud.com/artist/track",
 		})
 		return
 	}
 
-	reelURL := match
-	if reelURL == "" {
-		reelURL = "file://" + mediaUniqueID
+	sourceKind := "instagram"
+	sourceURL := igMatch
+	statusText := "📥 دریافت شد! در حال استخراج و بررسی صدای ریلز... ⏳"
+	if sourceURL == "" && scMatch != "" {
+		sourceKind = "soundcloud"
+		sourceURL = scMatch
+		statusText = "📥 دریافت شد! در حال دانلود از ساندکلاد... ⏳"
 	}
-	normalizedURL := normalizeInstagramURL(reelURL)
+	if sourceURL == "" {
+		sourceKind = "upload"
+		sourceURL = "file://" + mediaUniqueID
+		statusText = "📥 فایل دریافت شد! در حال پردازش صدا... ⏳"
+	}
+	reelURL := sourceURL
+	normalizedURL := normalizeRequestURL(reelURL)
 	if h.rateLimiter != nil {
 		allowed, err := h.rateLimiter.Allow(ctx, userID, h.rateLimit, h.rateWindow)
 		if err != nil {
@@ -197,16 +215,17 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			return
 		}
 	}
-	slog.Info("processing new reel request",
+	slog.Info("processing new media request",
 		"chat_id", chatID,
 		"user_id", userID,
+		"source_kind", sourceKind,
 		"url", reelURL,
 	)
 
 	// Send initial acknowledgment message in casual Farsi
 	statusMsg, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
-		Text:   "📥 دریافت شد! در حال استخراج و بررسی صدای ریلز... ⏳",
+		Text:   statusText,
 	})
 
 	go func() {
@@ -271,10 +290,21 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		}
 
 		// Execute business usecase
-		payload, err := h.useCase.Execute(workCtx, workDir, reelURL, progressCb)
+		var payload *domain.AudioPayload
+		var err error
+		switch sourceKind {
+		case "soundcloud":
+			if h.soundCloudUC == nil {
+				err = fmt.Errorf("soundcloud processing is not configured")
+			} else {
+				payload, err = h.soundCloudUC.Execute(workCtx, workDir, reelURL, progressCb)
+			}
+		default:
+			payload, err = h.useCase.Execute(workCtx, workDir, reelURL, progressCb)
+		}
 		if err != nil {
 			h.finishRequest(ctx, request, "failed", err.Error(), 0)
-			slog.Error("failed to process reel audio", "chat_id", chatID, "err", err, "url", reelURL)
+			slog.Error("failed to process media", "chat_id", chatID, "err", err, "url", reelURL, "source_kind", sourceKind)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
@@ -654,7 +684,7 @@ func requestLabel(request domain.Request) string {
 	}
 }
 
-func normalizeInstagramURL(raw string) string {
+func normalizeRequestURL(raw string) string {
 	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if index := strings.IndexByte(normalized, '?'); index >= 0 {
 		normalized = normalized[:index]
@@ -673,8 +703,13 @@ func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL s
 			URL:  payload.YouTubeURL,
 		})
 	}
-
-	if reelURL != "" {
+	if payload.SoundCloudURL != "" {
+		linkRow = append(linkRow, models.InlineKeyboardButton{
+			Text: "☁️ ساندکلاد",
+			URL:  payload.SoundCloudURL,
+		})
+	}
+	if reelURL != "" && !strings.HasPrefix(reelURL, "file://") && reelURL != payload.SoundCloudURL {
 		linkRow = append(linkRow, models.InlineKeyboardButton{
 			Text: "🔗 مشاهده پست",
 			URL:  reelURL,
@@ -742,9 +777,12 @@ func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID in
 		})
 	}
 
-	msgText := "متأسفانه نتونستم صدای این پست رو دریافت کنم. ممکنه پیج پرایوت باشه یا اینستاگرام موقتاً محدود کرده باشه 😕"
+	msgText := "متأسفانه نتونستم این درخواست رو کامل کنم. لطفاً دوباره تلاش کن 😕"
 	if err != nil && strings.Contains(err.Error(), "extraction failed") {
 		msgText = "❌ متأسفانه نتوانستم ویدیو را دانلود کنم. اگر این پیج پرایوت (Private) است، ربات قادر به دانلود آن نیست. لطفاً فقط لینک‌های پابلیک بفرستید."
+	}
+	if err != nil && strings.Contains(err.Error(), "soundcloud") {
+		msgText = "❌ دانلود از ساندکلاد ناموفق بود. لینک ترک را بررسی کنید و دوباره تلاش کنید."
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{

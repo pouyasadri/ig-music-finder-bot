@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"telegram-audio-bot/internal/domain"
-	"telegram-audio-bot/internal/usecase"
 
 	"github.com/acrcloud/acrcloud_sdk_golang/acrcloud"
 )
@@ -42,7 +41,7 @@ type acrResponse struct {
 	} `json:"metadata"`
 }
 
-func NewACRCloudRecognizer(host, key, secret string) usecase.MusicRecognizer {
+func NewACRCloudRecognizer(host, key, secret string) domain.MusicRecognizer {
 	return &ACRCloudRecognizer{host: host, key: key, secret: secret}
 }
 

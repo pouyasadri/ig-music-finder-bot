@@ -1,14 +1,13 @@
 package recognizer
 
 import (
+	"telegram-audio-bot/internal/domain"
 	"time"
-
-	"telegram-audio-bot/internal/usecase"
 )
 
 // Engine defines a concrete recognizer implementation together with its timeout budget.
 type Engine struct {
 	Name       string
-	Recognizer usecase.MusicRecognizer
+	Recognizer domain.MusicRecognizer
 	Timeout    time.Duration
 }

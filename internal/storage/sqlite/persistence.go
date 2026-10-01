@@ -149,9 +149,6 @@ type SQLiteRequestRepository struct{ db *sql.DB }
 
 func NewRequestRepository(db *sql.DB) *SQLiteRequestRepository { return &SQLiteRequestRepository{db} }
 
-type SQLiteHistoryRepository = SQLiteRequestRepository
-
-func NewHistoryRepository(db *sql.DB) *SQLiteRequestRepository { return NewRequestRepository(db) }
 func (r *SQLiteRequestRepository) Create(ctx context.Context, v *domain.Request) error {
 	if v.CreatedAt.IsZero() {
 		v.CreatedAt = time.Now()
@@ -371,73 +368,4 @@ func (r *SQLiteFavoriteRepository) DeleteForUser(ctx context.Context, uid int64)
 }
 func (r *SQLiteFavoriteRepository) DeleteAll(ctx context.Context, uid int64) error {
 	return r.DeleteForUser(ctx, uid)
-}
-
-type SQLitePendingCallbackRepository struct{ db *sql.DB }
-
-func NewPendingCallbackRepository(db *sql.DB) *SQLitePendingCallbackRepository {
-	return &SQLitePendingCallbackRepository{db}
-}
-
-type SQLiteCallbackActionRepository = SQLitePendingCallbackRepository
-
-func NewCallbackActionRepository(db *sql.DB) *SQLitePendingCallbackRepository {
-	return NewPendingCallbackRepository(db)
-}
-func (r *SQLitePendingCallbackRepository) Create(ctx context.Context, v *domain.PendingCallbackAction) error {
-	if v.CreatedAt.IsZero() {
-		v.CreatedAt = time.Now()
-	}
-	res, e := r.db.ExecContext(ctx, `INSERT INTO pending_callback_actions(user_id,action,payload,expires_at,created_at) VALUES(?,?,?,?,?)`, v.UserID, v.Action, v.Payload, nanos(v.ExpiresAt), nanos(v.CreatedAt))
-	if e == nil {
-		v.ID, e = res.LastInsertId()
-	}
-	return e
-}
-func (r *SQLitePendingCallbackRepository) GetByIDForUser(ctx context.Context, id, uid int64) (*domain.PendingCallbackAction, error) {
-	v := new(domain.PendingCallbackAction)
-	var x, c int64
-	e := r.db.QueryRowContext(ctx, `SELECT id,user_id,action,payload,expires_at,created_at FROM pending_callback_actions WHERE id=? AND user_id=?`, id, uid).Scan(&v.ID, &v.UserID, &v.Action, &v.Payload, &x, &c)
-	if errors.Is(e, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if e == nil {
-		v.ExpiresAt = fromNanos(x)
-		v.CreatedAt = fromNanos(c)
-	}
-	return v, e
-}
-func (r *SQLitePendingCallbackRepository) ListByUser(ctx context.Context, uid int64, p domain.Page) ([]domain.PendingCallbackAction, error) {
-	l, o := page(p)
-	rows, e := r.db.QueryContext(ctx, `SELECT id,user_id,action,payload,expires_at,created_at FROM pending_callback_actions WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`, uid, l, o)
-	if e != nil {
-		return nil, e
-	}
-	defer rows.Close()
-	out := []domain.PendingCallbackAction{}
-	for rows.Next() {
-		var v domain.PendingCallbackAction
-		var x, c int64
-		if e = rows.Scan(&v.ID, &v.UserID, &v.Action, &v.Payload, &x, &c); e != nil {
-			return nil, e
-		}
-		v.ExpiresAt = fromNanos(x)
-		v.CreatedAt = fromNanos(c)
-		out = append(out, v)
-	}
-	return out, rows.Err()
-}
-func (r *SQLitePendingCallbackRepository) Delete(ctx context.Context, id, uid int64) error {
-	res, e := r.db.ExecContext(ctx, `DELETE FROM pending_callback_actions WHERE id=? AND user_id=?`, id, uid)
-	if e == nil {
-		n, _ := res.RowsAffected()
-		if n == 0 {
-			return ErrNotFound
-		}
-	}
-	return e
-}
-func (r *SQLitePendingCallbackRepository) DeleteExpired(ctx context.Context) error {
-	_, e := r.db.ExecContext(ctx, `DELETE FROM pending_callback_actions WHERE expires_at<=?`, nanos(time.Now()))
-	return e
 }

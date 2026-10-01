@@ -8,14 +8,13 @@ import (
 	"strings"
 
 	"telegram-audio-bot/internal/domain"
-	"telegram-audio-bot/internal/usecase"
 )
 
 type ShazamIORecognizer struct {
 	scriptPath string
 }
 
-func NewShazamIORecognizer(scriptPath string) usecase.MusicRecognizer {
+func NewShazamIORecognizer(scriptPath string) domain.MusicRecognizer {
 	return &ShazamIORecognizer{scriptPath: scriptPath}
 }
 

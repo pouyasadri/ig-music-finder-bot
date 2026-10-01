@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 
 	"telegram-audio-bot/internal/domain"
-	"telegram-audio-bot/internal/usecase"
 )
 
 type AudDRecognizer struct {
@@ -20,7 +19,7 @@ type AudDRecognizer struct {
 	client   *http.Client
 }
 
-func NewAudDRecognizer(apiToken string, client *http.Client) usecase.MusicRecognizer {
+func NewAudDRecognizer(apiToken string, client *http.Client) domain.MusicRecognizer {
 	if client == nil {
 		client = http.DefaultClient
 	}

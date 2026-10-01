@@ -8,14 +8,13 @@ import (
 	"strings"
 
 	"telegram-audio-bot/internal/domain"
-	"telegram-audio-bot/internal/usecase"
 )
 
 type PlatformScraperRecognizer struct {
 	cookiesPath string
 }
 
-func NewPlatformScraperRecognizer(cookiesPath string) usecase.URLMusicRecognizer {
+func NewPlatformScraperRecognizer(cookiesPath string) domain.URLMusicRecognizer {
 	return &PlatformScraperRecognizer{
 		cookiesPath: cookiesPath,
 	}

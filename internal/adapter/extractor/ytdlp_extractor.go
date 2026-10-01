@@ -8,16 +8,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"telegram-audio-bot/internal/domain"
 	"time"
-
-	"telegram-audio-bot/internal/usecase"
 )
 
 type YtDlpExtractor struct {
 	cookiesPath string
 }
 
-func NewYtDlpExtractor(cookiesPath string) usecase.MediaExtractor {
+func NewYtDlpExtractor(cookiesPath string) domain.MediaExtractor {
 	return &YtDlpExtractor{cookiesPath: cookiesPath}
 }
 

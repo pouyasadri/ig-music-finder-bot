@@ -12,22 +12,22 @@ import (
 )
 
 type processReelUseCase struct {
-	extractor     MediaExtractor
-	recognizer    MusicRecognizer
-	urlRecognizer URLMusicRecognizer
-	downloader    MusicDownloader
-	cache         MetadataCache
+	extractor     domain.MediaExtractor
+	recognizer    domain.MusicRecognizer
+	urlRecognizer domain.URLMusicRecognizer
+	downloader    domain.MusicDownloader
+	cache         domain.MetadataCache
 	cacheTTL      time.Duration
 }
 
-func NewCachedProcessReelUseCase(e MediaExtractor, r MusicRecognizer, u URLMusicRecognizer, d MusicDownloader, cache MetadataCache, cacheTTL time.Duration) ReelAudioUseCase {
+func NewCachedProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u domain.URLMusicRecognizer, d domain.MusicDownloader, cache domain.MetadataCache, cacheTTL time.Duration) ReelAudioUseCase {
 	uc := NewProcessReelUseCase(e, r, u, d).(*processReelUseCase)
 	uc.cache = cache
 	uc.cacheTTL = cacheTTL
 	return uc
 }
 
-func NewProcessReelUseCase(e MediaExtractor, r MusicRecognizer, u URLMusicRecognizer, d MusicDownloader) ReelAudioUseCase {
+func NewProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u domain.URLMusicRecognizer, d domain.MusicDownloader) ReelAudioUseCase {
 	return &processReelUseCase{
 		extractor:     e,
 		recognizer:    r,
