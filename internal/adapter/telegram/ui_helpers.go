@@ -1,9 +1,13 @@
 package telegram
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"telegram-audio-bot/internal/domain"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -42,12 +46,12 @@ func StateMessage(state ProcessingState) string {
 
 // RequestLabel returns a Persian status label for a request.
 func RequestLabel(status string) string {
-	switch status {
-	case "completed":
+	switch domain.RequestStatus(status) {
+	case domain.RequestStatusCompleted:
 		return "✅ تکمیل شد"
-	case "failed":
+	case domain.RequestStatusFailed:
 		return "❌ ناموفق"
-	case "processing":
+	case domain.RequestStatusProcessing:
 		return "⏳ در حال پردازش"
 	default:
 		return "⏳ نامعلوم"
@@ -60,47 +64,57 @@ func ErrorCategoryAndMessage(err error) (category, message string) {
 		return "none", ""
 	}
 
-	errStr := err.Error()
 	switch {
-	case contains(errStr, "extraction failed"):
+	case errors.Is(err, domain.ErrExtractionFailed), errors.Is(err, domain.ErrPrivateContent):
+		if errors.Is(err, domain.ErrPrivateContent) {
+			return "private", "🔒 این محتوا خصوصی است. لطفاً فقط لینک‌های پابلیک بفرستید."
+		}
 		return "extraction", "❌ متأسفانه نتوانستم ویدیو را دانلود کنم. اگر این پیج پرایوت (Private) است، ربات قادر به دانلود آن نیست."
-	case contains(errStr, "private"):
-		return "private", "🔒 این محتوا خصوصی است. لطفاً فقط لینک‌های پابلیک بفرستید."
-	case contains(errStr, "rate limit"):
+	case errors.Is(err, domain.ErrSoundCloudDownloadFailed):
+		return "soundcloud", "❌ دانلود از ساندکلاد ناموفق بود. لینک ترک را بررسی کنید و دوباره تلاش کنید."
+	case errors.Is(err, domain.ErrRateLimited):
 		return "rate_limit", "⏳ تعداد درخواست‌های شما بیشتر از حد مجاز است. لطفاً کمی بعد دوباره تلاش کنید."
-	case contains(errStr, "queue full"):
+	case errors.Is(err, domain.ErrQueueFull):
 		return "queue_full", "🚦 ربات در حال حاضر شلوغ است. لطفاً کمی بعد دوباره تلاش کنید."
-	case contains(errStr, "file too large"):
+	case errors.Is(err, domain.ErrLeaseHeld):
+		return "lease_held", "🔄 این لینک هم‌اکنون در حال پردازش است. لطفاً کمی صبر کنید."
+	case errors.Is(err, domain.ErrFileTooLarge):
 		return "too_large", "📦 حجم فایل بیش از حد مجاز است (حداکثر ۵۰ مگابایت)."
-	case contains(errStr, "invalid"):
+	case errors.Is(err, domain.ErrInvalidInput):
 		return "invalid", "❌ لینک یا فایل قابل پردازش نیست."
-	case contains(errStr, "timeout"):
+	case errors.Is(err, domain.ErrRequestTimeout), errors.Is(err, context.DeadlineExceeded):
 		return "timeout", "⏱ درخواست برای دریافت پاسخ زمان‌برد. لطفاً دوباره تلاش کنید."
+	case errors.Is(err, domain.ErrDownloadFailed), errors.Is(err, domain.ErrDurationMismatch):
+		return "download", "⚠️ دریافت نسخه کامل ناموفق بود. در صورت امکان صدای اصلی ارسال می‌شود."
 	default:
+		errStr := err.Error()
+		if contains(errStr, "private") {
+			return "private", "🔒 این محتوا خصوصی است. لطفاً فقط لینک‌های پابلیک بفرستید."
+		}
 		return "internal", "⚠️ خطای موقت رخ داد. لطفاً دوباره تلاش کنید."
 	}
 }
 
-// SourceTypeEmoji returns an emoji for request source type.
+// SourceTypeFromURL returns a stable source kind for logging and labels.
 func SourceTypeFromURL(raw string) string {
 	value := strings.ToLower(raw)
 	switch {
 	case strings.Contains(value, "instagram.com"), strings.Contains(value, "instagr.am"):
-		return "instagram"
-	case strings.Contains(value, "soundcloud.com"):
-		return "soundcloud"
+		return string(domain.SourceKindInstagram)
+	case strings.Contains(value, "soundcloud.com"), strings.Contains(value, "on.soundcloud.com"):
+		return string(domain.SourceKindSoundCloud)
 	default:
-		return "upload"
+		return string(domain.SourceKindUpload)
 	}
 }
 
 func SourceTypeEmoji(sourceType string) string {
-	switch sourceType {
-	case "instagram":
+	switch domain.SourceKind(sourceType) {
+	case domain.SourceKindInstagram:
 		return "📷"
-	case "soundcloud":
+	case domain.SourceKindSoundCloud:
 		return "☁️"
-	case "upload":
+	case domain.SourceKindUpload:
 		return "📤"
 	default:
 		return "📎"

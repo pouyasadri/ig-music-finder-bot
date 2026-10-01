@@ -123,7 +123,7 @@ func (r *SQLiteSettingsRepository) Upsert(ctx context.Context, s *domain.UserSet
 	}
 	s.UpdatedAt = now
 	if s.OutputMode == "" {
-		s.OutputMode = "full"
+		s.OutputMode = domain.OutputModeFull
 	}
 	_, e := r.db.ExecContext(ctx, `INSERT INTO user_settings(user_id,language,notifications_enabled,output_mode,keep_history,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET language=excluded.language,notifications_enabled=excluded.notifications_enabled,output_mode=excluded.output_mode,keep_history=excluded.keep_history,updated_at=excluded.updated_at`, s.UserID, s.Language, boolInt(s.NotificationsEnabled), s.OutputMode, boolInt(s.KeepHistory), nanos(s.CreatedAt), nanos(s.UpdatedAt))
 	return e

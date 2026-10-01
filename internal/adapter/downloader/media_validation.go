@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"telegram-audio-bot/internal/domain"
 )
 
 func validateAudioFile(path string, maxBytes int64) (int, error) {
@@ -17,7 +19,7 @@ func validateAudioFile(path string, maxBytes int64) (int, error) {
 		return 0, fmt.Errorf("audio file is empty: %s", path)
 	}
 	if maxBytes > 0 && info.Size() > maxBytes {
-		return 0, fmt.Errorf("audio file exceeds limit: %d bytes", info.Size())
+		return 0, fmt.Errorf("%w: %d bytes", domain.ErrFileTooLarge, info.Size())
 	}
 
 	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
@@ -33,29 +35,7 @@ func validateAudioFile(path string, maxBytes int64) (int, error) {
 }
 
 func validateTrackDuration(actual, expected int) error {
-	if actual <= 0 {
-		return fmt.Errorf("audio duration is unavailable")
-	}
-	if expected <= 0 {
-		if actual < 60 {
-			return fmt.Errorf("audio appears to be a preview: %d seconds", actual)
-		}
-		return nil
-	}
-
-	// Providers may add intros/outros, but a result substantially shorter than
-	// the recognized recording is almost always a preview or an incomplete file.
-	tolerance := expected / 10
-	if tolerance < 10 {
-		tolerance = 10
-	}
-	if actual+tolerance < expected {
-		return fmt.Errorf("audio is shorter than expected: actual=%ds expected=%ds", actual, expected)
-	}
-	if actual > expected+tolerance*3 {
-		return fmt.Errorf("audio is longer than expected: actual=%ds expected=%ds", actual, expected)
-	}
-	return nil
+	return domain.DefaultDurationPolicy().Validate(actual, expected)
 }
 
 func validateThumbnail(path string) string {

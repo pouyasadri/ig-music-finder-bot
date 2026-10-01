@@ -1,6 +1,12 @@
 package telegram
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"telegram-audio-bot/internal/domain"
+)
 
 func TestStateMessageAndFormatting(t *testing.T) {
 	if got := StateMessage(StateRecognizing); got != "🎵 در حال شناسایی آهنگ" {
@@ -11,6 +17,17 @@ func TestStateMessageAndFormatting(t *testing.T) {
 	}
 	if got := RequestLabel("completed"); got != "✅ تکمیل شد" {
 		t.Fatalf("unexpected request label: %s", got)
+	}
+}
+
+func TestErrorCategoryAndMessageDomainErrors(t *testing.T) {
+	_, msg := ErrorCategoryAndMessage(domain.ErrRateLimited)
+	if msg == "" {
+		t.Fatal("expected rate limit message")
+	}
+	_, msg = ErrorCategoryAndMessage(fmt.Errorf("%w: detail", domain.ErrExtractionFailed))
+	if !strings.Contains(msg, "دانلود") {
+		t.Fatalf("unexpected extraction message: %s", msg)
 	}
 }
 

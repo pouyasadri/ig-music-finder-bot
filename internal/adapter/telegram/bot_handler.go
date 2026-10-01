@@ -153,21 +153,21 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		return
 	}
 
-	sourceKind := "instagram"
+	sourceKind := domain.SourceKindInstagram
 	sourceURL := igMatch
 	statusText := "📥 دریافت شد! در حال استخراج و بررسی صدای ریلز... ⏳"
 	if sourceURL == "" && scMatch != "" {
-		sourceKind = "soundcloud"
+		sourceKind = domain.SourceKindSoundCloud
 		sourceURL = scMatch
 		statusText = "📥 دریافت شد! در حال دانلود از ساندکلاد... ⏳"
 	}
 	if sourceURL == "" {
-		sourceKind = "upload"
+		sourceKind = domain.SourceKindUpload
 		sourceURL = "file://" + mediaUniqueID
 		statusText = "📥 فایل دریافت شد! در حال پردازش صدا... ⏳"
 	}
 	reelURL := sourceURL
-	normalizedURL := normalizeRequestURL(reelURL)
+	normalizedURL := domain.NormalizeMediaURL(reelURL)
 	if h.rateLimiter != nil {
 		allowed, err := h.rateLimiter.Allow(ctx, userID, h.rateLimit, h.rateWindow)
 		if err != nil {
@@ -176,7 +176,8 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			return
 		}
 		if !allowed {
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "⏳ تعداد درخواست‌های شما به حد مجاز رسیده است. لطفاً کمی بعد دوباره تلاش کنید."})
+			_, msg := ErrorCategoryAndMessage(domain.ErrRateLimited)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: msg})
 			return
 		}
 	}
@@ -185,7 +186,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 	if h.users != nil && h.requests != nil {
 		storedUser := h.ensureUser(ctx, update.Message.From)
 		if storedUser != nil {
-			request = &domain.Request{UserID: storedUser.ID, URL: normalizedURL, Status: "processing"}
+			request = &domain.Request{UserID: storedUser.ID, URL: normalizedURL, Status: domain.RequestStatusProcessing}
 			if err := h.requests.Create(ctx, request); err != nil {
 				slog.Warn("failed to persist request", "err", err)
 				request = nil
@@ -200,7 +201,8 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			return
 		}
 		if !acquired {
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "🔄 این لینک هم‌اکنون در حال پردازش است. لطفاً کمی صبر کنید."})
+			_, msg := ErrorCategoryAndMessage(domain.ErrLeaseHeld)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: msg})
 			return
 		}
 	}
@@ -211,7 +213,8 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			if h.leases != nil {
 				_ = h.leases.Release(context.Background(), normalizedURL, leaseOwner)
 			}
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "⏳ ربات در حال حاضر شلوغ است. لطفاً کمی بعد دوباره تلاش کنید."})
+			_, msg := ErrorCategoryAndMessage(domain.ErrQueueFull)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: msg})
 			return
 		}
 	}
@@ -269,7 +272,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		if mediaID != "" {
 			mediaPath, downloadErr := h.downloadTelegramMedia(ctx, b, mediaID, mediaUniqueID, workDir)
 			if downloadErr != nil {
-				h.finishRequest(ctx, request, "failed", downloadErr.Error(), 0)
+				h.finishRequest(ctx, request, domain.RequestStatusFailed, downloadErr.Error(), 0)
 				h.sendErrorMessage(ctx, b, chatID, statusMsg, downloadErr)
 				return
 			}
@@ -293,9 +296,9 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		var payload *domain.AudioPayload
 		var err error
 		switch sourceKind {
-		case "soundcloud":
+		case domain.SourceKindSoundCloud:
 			if h.soundCloudUC == nil {
-				err = fmt.Errorf("soundcloud processing is not configured")
+				err = fmt.Errorf("%w: soundcloud processing is not configured", domain.ErrInvalidInput)
 			} else {
 				payload, err = h.soundCloudUC.Execute(workCtx, workDir, reelURL, progressCb)
 			}
@@ -303,13 +306,13 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			payload, err = h.useCase.Execute(workCtx, workDir, reelURL, progressCb)
 		}
 		if err != nil {
-			h.finishRequest(ctx, request, "failed", err.Error(), 0)
+			h.finishRequest(ctx, request, domain.RequestStatusFailed, err.Error(), 0)
 			slog.Error("failed to process media", "chat_id", chatID, "err", err, "url", reelURL, "source_kind", sourceKind)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
 		if request != nil && h.settings != nil {
-			if settings, settingsErr := h.settings.Get(ctx, request.UserID); settingsErr == nil && settings.OutputMode == "original" && payload.OriginalPath != "" {
+			if settings, settingsErr := h.settings.Get(ctx, request.UserID); settingsErr == nil && settings.OutputMode.OrDefault() == domain.OutputModeOriginal && payload.OriginalPath != "" {
 				payload.FilePath = payload.OriginalPath
 				payload.Title = "Original Reel Audio"
 				payload.Performer = "Instagram"
@@ -322,7 +325,7 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		// Inspect downloaded file
 		fileInfo, err := os.Stat(payload.FilePath)
 		if err != nil {
-			h.finishRequest(ctx, request, "failed", err.Error(), 0)
+			h.finishRequest(ctx, request, domain.RequestStatusFailed, err.Error(), 0)
 			slog.Error("output file stat failed", "err", err, "path", payload.FilePath)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
@@ -331,11 +334,12 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		// Safety check: Telegram standard bot upload limit is 50MB
 		const maxUploadBytes = 49 * 1024 * 1024
 		if fileInfo.Size() > maxUploadBytes {
-			h.finishRequest(ctx, request, "failed", "file too large", 0)
+			h.finishRequest(ctx, request, domain.RequestStatusFailed, domain.ErrFileTooLarge.Error(), 0)
 			slog.Warn("audio file exceeds 50MB limit", "size_bytes", fileInfo.Size())
+			_, msg := ErrorCategoryAndMessage(domain.ErrFileTooLarge)
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: chatID,
-				Text:   "⚠️ حجم فایل صوتی بیشتر از حد مجاز تلگرام (۵۰ مگابایت) است.",
+				Text:   msg,
 			})
 			return
 		}
@@ -411,12 +415,12 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		_, err = b.SendAudio(ctx, sendParams)
 		uploadMs := time.Since(uploadStart).Milliseconds()
 		if err != nil {
-			h.finishRequest(ctx, request, "failed", err.Error(), 0)
+			h.finishRequest(ctx, request, domain.RequestStatusFailed, err.Error(), 0)
 			slog.Error("failed to send audio file to user", "chat_id", chatID, "err", err, "upload_ms", uploadMs)
 			h.sendErrorMessage(ctx, b, chatID, statusMsg, err)
 			return
 		}
-		h.finishRequest(ctx, request, "completed", "", trackID)
+		h.finishRequest(ctx, request, domain.RequestStatusCompleted, "", trackID)
 
 		// Clean up initial status message after sending audio
 		if statusMsg != nil {
@@ -503,7 +507,7 @@ func (h *BotHandler) ensureUser(ctx context.Context, user *models.User) *domain.
 	return stored
 }
 
-func (h *BotHandler) finishRequest(ctx context.Context, request *domain.Request, status, requestError string, trackID int64) {
+func (h *BotHandler) finishRequest(ctx context.Context, request *domain.Request, status domain.RequestStatus, requestError string, trackID int64) {
 	if request == nil || h.requests == nil {
 		return
 	}
@@ -573,17 +577,14 @@ func (h *BotHandler) sendSettings(ctx context.Context, b *bot.Bot, chatID, teleg
 	}
 	settings, err := h.settings.Get(ctx, user.ID)
 	if err != nil {
-		settings = &domain.UserSettings{UserID: user.ID, OutputMode: "full", KeepHistory: true}
+		settings = &domain.UserSettings{UserID: user.ID, OutputMode: domain.OutputModeFull, KeepHistory: true}
 		_ = h.settings.Upsert(ctx, settings)
 	}
-	mode := settings.OutputMode
-	if mode == "" {
-		mode = "full"
-	}
+	mode := settings.OutputMode.OrDefault()
 	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
-		{{Text: "🎵 آهنگ کامل" + selected(mode == "full"), CallbackData: "settings_mode_full"}},
-		{{Text: "🎶 صدای اصلی" + selected(mode == "original"), CallbackData: "settings_mode_original"}},
-		{{Text: "📦 هر دو" + selected(mode == "both"), CallbackData: "settings_mode_both"}},
+		{{Text: "🎵 آهنگ کامل" + selected(mode == domain.OutputModeFull), CallbackData: "settings_mode_full"}},
+		{{Text: "🎶 صدای اصلی" + selected(mode == domain.OutputModeOriginal), CallbackData: "settings_mode_original"}},
+		{{Text: "📦 هر دو" + selected(mode == domain.OutputModeBoth), CallbackData: "settings_mode_both"}},
 	}}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: "⚙️ حالت خروجی پیش‌فرض را انتخاب کنید:", ReplyMarkup: markup})
 }
@@ -604,8 +605,8 @@ func (h *BotHandler) handleSettingsMode(ctx context.Context, b *bot.Bot, update 
 	if user == nil {
 		return
 	}
-	mode := strings.TrimPrefix(update.CallbackQuery.Data, "settings_mode_")
-	if mode != "full" && mode != "original" && mode != "both" {
+	mode, ok := domain.ParseOutputMode(strings.TrimPrefix(update.CallbackQuery.Data, "settings_mode_"))
+	if !ok {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: update.CallbackQuery.ID, Text: "تنظیم نامعتبر است.", ShowAlert: true})
 		return
 	}
@@ -674,22 +675,7 @@ func (h *BotHandler) sendMessage(ctx context.Context, b *bot.Bot, chatID int64, 
 }
 
 func requestLabel(request domain.Request) string {
-	switch request.Status {
-	case "completed":
-		return "✅ تکمیل شد"
-	case "failed":
-		return "❌ ناموفق"
-	default:
-		return "⏳ در حال پردازش"
-	}
-}
-
-func normalizeRequestURL(raw string) string {
-	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
-	if index := strings.IndexByte(normalized, '?'); index >= 0 {
-		normalized = normalized[:index]
-	}
-	return strings.ToLower(normalized)
+	return RequestLabel(string(request.Status))
 }
 
 func (h *BotHandler) buildInlineKeyboard(payload *domain.AudioPayload, reelURL string) *models.InlineKeyboardMarkup {
@@ -777,12 +763,9 @@ func (h *BotHandler) sendErrorMessage(ctx context.Context, b *bot.Bot, chatID in
 		})
 	}
 
-	msgText := "متأسفانه نتونستم این درخواست رو کامل کنم. لطفاً دوباره تلاش کن 😕"
-	if err != nil && strings.Contains(err.Error(), "extraction failed") {
-		msgText = "❌ متأسفانه نتوانستم ویدیو را دانلود کنم. اگر این پیج پرایوت (Private) است، ربات قادر به دانلود آن نیست. لطفاً فقط لینک‌های پابلیک بفرستید."
-	}
-	if err != nil && strings.Contains(err.Error(), "soundcloud") {
-		msgText = "❌ دانلود از ساندکلاد ناموفق بود. لینک ترک را بررسی کنید و دوباره تلاش کنید."
+	_, msgText := ErrorCategoryAndMessage(err)
+	if msgText == "" {
+		msgText = "⚠️ خطای موقت رخ داد. لطفاً دوباره تلاش کنید."
 	}
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{

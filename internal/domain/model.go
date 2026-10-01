@@ -39,7 +39,7 @@ type UserSettings struct {
 	UserID               int64
 	Language             string
 	NotificationsEnabled bool
-	OutputMode           string
+	OutputMode           OutputMode
 	KeepHistory          bool
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -49,7 +49,7 @@ type Request struct {
 	ID          int64
 	UserID      int64
 	URL         string
-	Status      string
+	Status      RequestStatus
 	Error       string
 	TrackID     int64
 	CreatedAt   time.Time

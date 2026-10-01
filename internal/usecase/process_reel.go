@@ -3,9 +3,9 @@ package usecase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"telegram-audio-bot/internal/domain"
@@ -53,7 +53,7 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 	}
 	t1 := time.Now()
 	var meta *domain.TrackMetadata
-	cacheKey := normalizeURL(reelURL)
+	cacheKey := domain.NormalizeMediaURL(reelURL)
 	if uc.cache != nil {
 		if cached, cacheErr := uc.cache.Get(ctx, cacheKey); cacheErr == nil {
 			var cachedMeta domain.TrackMetadata
@@ -105,7 +105,7 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		fullTrackPath, thumbnailPath, duration, err := uc.downloader.Download(ctx, targetDir, downloadTarget, meta.Duration)
 		downloadMs := time.Since(t2).Milliseconds()
 
-		if err == nil && fullTrackPath != "" && downloadedDurationMatches(duration, meta.Duration) {
+		if err == nil && fullTrackPath != "" && domain.DefaultDurationPolicy().Matches(duration, meta.Duration) {
 			slog.Info("download completed", "download_ms", downloadMs, "target", downloadTarget)
 
 			finalDuration := duration
@@ -131,7 +131,10 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		}
 
 		if err == nil {
-			err = fmt.Errorf("downloaded track duration is not compatible with recognized track: actual=%ds expected=%ds", duration, meta.Duration)
+			err = fmt.Errorf("%w: actual=%ds expected=%ds", domain.ErrDurationMismatch, duration, meta.Duration)
+		}
+		if err != nil && !errors.Is(err, domain.ErrDurationMismatch) {
+			err = fmt.Errorf("%w: %v", domain.ErrDownloadFailed, err)
 		}
 		slog.Warn("download failed, falling back to raw reel audio", "download_ms", downloadMs, "err", err)
 	} else {
@@ -150,26 +153,4 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		FilePath:     rawPath,
 		IsFullTrack:  false,
 	}, nil
-}
-
-func downloadedDurationMatches(actual, expected int) bool {
-	if actual <= 0 {
-		return false
-	}
-	if expected <= 0 {
-		return actual >= 60
-	}
-	tolerance := expected / 10
-	if tolerance < 10 {
-		tolerance = 10
-	}
-	return actual+tolerance >= expected && actual <= expected+tolerance*3
-}
-
-func normalizeURL(raw string) string {
-	normalized := strings.TrimRight(strings.TrimSpace(raw), "/")
-	if index := strings.IndexByte(normalized, '?'); index >= 0 {
-		normalized = normalized[:index]
-	}
-	return strings.ToLower(normalized)
 }
