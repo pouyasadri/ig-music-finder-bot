@@ -284,13 +284,13 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 		go h.keepChatActionActive(workCtx, b, chatID, stopChatAction)
 		defer close(stopChatAction)
 
-		progressCb := func(msg string) {
+		progress := newMessageProgressReporter(func(msg string) {
 			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 				ChatID:    chatID,
 				MessageID: statusMsg.ID,
 				Text:      msg,
 			})
-		}
+		})
 
 		// Execute business usecase
 		var payload *domain.AudioPayload
@@ -300,10 +300,10 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 			if h.soundCloudUC == nil {
 				err = fmt.Errorf("%w: soundcloud processing is not configured", domain.ErrInvalidInput)
 			} else {
-				payload, err = h.soundCloudUC.Execute(workCtx, workDir, reelURL, progressCb)
+				payload, err = h.soundCloudUC.Execute(workCtx, workDir, reelURL, progress)
 			}
 		default:
-			payload, err = h.useCase.Execute(workCtx, workDir, reelURL, progressCb)
+			payload, err = h.useCase.Execute(workCtx, workDir, reelURL, progress)
 		}
 		if err != nil {
 			h.finishRequest(ctx, request, domain.RequestStatusFailed, err.Error(), 0)

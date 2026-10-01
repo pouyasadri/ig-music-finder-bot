@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"telegram-audio-bot/internal/domain"
+	"telegram-audio-bot/internal/usecase"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -26,22 +27,7 @@ const (
 
 // StateMessage returns a user-friendly Persian message for each processing state.
 func StateMessage(state ProcessingState) string {
-	switch state {
-	case StateReceived:
-		return "📥 درخواست دریافت شد"
-	case StateQueued:
-		return "⏳ در صف پردازش"
-	case StateExtracting:
-		return "🔍 در حال استخراج صدا"
-	case StateRecognizing:
-		return "🎵 در حال شناسایی آهنگ"
-	case StateDownloading:
-		return "⬇️ در حال آماده‌سازی نسخه کامل"
-	case StateSending:
-		return "📤 در حال ارسال فایل"
-	default:
-		return "⏳ در حال پردازش"
-	}
+	return FormatProgress(domain.ProgressStage(state), usecase.ProgressDetail{})
 }
 
 // RequestLabel returns a Persian status label for a request.

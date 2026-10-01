@@ -16,18 +16,33 @@ type processReelUseCase struct {
 	recognizer    domain.MusicRecognizer
 	urlRecognizer domain.URLMusicRecognizer
 	downloader    domain.MusicDownloader
-	cache         domain.MetadataCache
-	cacheTTL      time.Duration
 }
 
-func NewCachedProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u domain.URLMusicRecognizer, d domain.MusicDownloader, cache domain.MetadataCache, cacheTTL time.Duration) ReelAudioUseCase {
-	uc := NewProcessReelUseCase(e, r, u, d).(*processReelUseCase)
-	uc.cache = cache
-	uc.cacheTTL = cacheTTL
-	return uc
+// cachedProcessReelUseCase decorates reel processing with recognition metadata caching.
+// File paths are request-scoped, so only TrackMetadata is cached — never AudioPayload.
+type cachedProcessReelUseCase struct {
+	inner    *processReelUseCase
+	cache    domain.MetadataCache
+	cacheTTL time.Duration
 }
 
 func NewProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u domain.URLMusicRecognizer, d domain.MusicDownloader) ReelAudioUseCase {
+	return newProcessReelUseCase(e, r, u, d)
+}
+
+func NewCachedProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u domain.URLMusicRecognizer, d domain.MusicDownloader, cache domain.MetadataCache, cacheTTL time.Duration) ReelAudioUseCase {
+	inner := newProcessReelUseCase(e, r, u, d)
+	if cache == nil {
+		return inner
+	}
+	return &cachedProcessReelUseCase{
+		inner:    inner,
+		cache:    cache,
+		cacheTTL: cacheTTL,
+	}
+}
+
+func newProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u domain.URLMusicRecognizer, d domain.MusicDownloader) *processReelUseCase {
 	return &processReelUseCase{
 		extractor:     e,
 		recognizer:    r,
@@ -36,10 +51,17 @@ func NewProcessReelUseCase(e domain.MediaExtractor, r domain.MusicRecognizer, u 
 	}
 }
 
-func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL string, progressCb func(string)) (*domain.AudioPayload, error) {
-	if progressCb != nil {
-		progressCb("🔍 در حال استخراج ویدیو از اینستاگرام...")
-	}
+func (uc *cachedProcessReelUseCase) Execute(ctx context.Context, targetDir, reelURL string, progress ProgressReporter) (*domain.AudioPayload, error) {
+	return uc.inner.execute(ctx, targetDir, reelURL, progress, uc.cache, uc.cacheTTL)
+}
+
+func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL string, progress ProgressReporter) (*domain.AudioPayload, error) {
+	return uc.execute(ctx, targetDir, reelURL, progress, nil, 0)
+}
+
+func (uc *processReelUseCase) execute(ctx context.Context, targetDir, reelURL string, progress ProgressReporter, cache domain.MetadataCache, cacheTTL time.Duration) (*domain.AudioPayload, error) {
+	reportProgress(progress, domain.ProgressExtracting, ProgressDetail{})
+
 	t0 := time.Now()
 	rawPath, snippetPath, err := uc.extractor.ExtractReel(ctx, targetDir, reelURL)
 	extractMs := time.Since(t0).Milliseconds()
@@ -48,51 +70,26 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		return nil, fmt.Errorf("%w: %v", domain.ErrExtractionFailed, err)
 	}
 
-	if progressCb != nil {
-		progressCb("🎵 در حال تشخیص آهنگ...")
-	}
+	reportProgress(progress, domain.ProgressRecognizing, ProgressDetail{})
+
 	t1 := time.Now()
-	var meta *domain.TrackMetadata
-	cacheKey := domain.NormalizeMediaURL(reelURL)
-	if uc.cache != nil {
-		if cached, cacheErr := uc.cache.Get(ctx, cacheKey); cacheErr == nil {
-			var cachedMeta domain.TrackMetadata
-			if jsonErr := json.Unmarshal(cached, &cachedMeta); jsonErr == nil && cachedMeta.IsMatched {
-				meta = &cachedMeta
-				slog.Info("recognition metadata cache hit", "key", cacheKey)
-			}
-		}
-	}
-	if meta == nil {
-		meta, err = uc.recognizer.Identify(ctx, snippetPath)
-	}
+	meta, err := uc.resolveMetadata(ctx, reelURL, snippetPath, cache)
 	recognizeMs := time.Since(t1).Milliseconds()
 
-	// Tier 4 fallback if primary recognizers miss
-	if (err != nil || meta == nil || !meta.IsMatched) && uc.urlRecognizer != nil {
-		tUrl := time.Now()
-		urlCtx, cancelUrl := context.WithTimeout(ctx, 3*time.Second)
-		urlMeta, urlErr := uc.urlRecognizer.IdentifyByURL(urlCtx, reelURL)
-		cancelUrl()
-
-		if urlErr == nil && urlMeta != nil && urlMeta.IsMatched {
-			meta = urlMeta
-			err = nil
-			slog.Info("url metadata scraping matched", "url_recognize_ms", time.Since(tUrl).Milliseconds())
-		}
-	}
-
 	if err == nil && meta != nil && meta.IsMatched {
-		if uc.cache != nil {
+		if cache != nil {
 			if encoded, marshalErr := json.Marshal(meta); marshalErr == nil {
-				if cacheErr := uc.cache.Set(ctx, cacheKey, encoded, time.Now().Add(uc.cacheTTL)); cacheErr != nil {
+				if cacheErr := cache.Set(ctx, domain.NormalizeMediaURL(reelURL), encoded, time.Now().Add(cacheTTL)); cacheErr != nil {
 					slog.Warn("failed to cache recognition metadata", "err", cacheErr)
 				}
 			}
 		}
-		if progressCb != nil {
-			progressCb(fmt.Sprintf("✅ آهنگ پیدا شد: %s\n⬇️ در حال دانلود کیفیت بالا...", meta.Title))
-		}
+
+		reportProgress(progress, domain.ProgressDownloading, ProgressDetail{
+			Title:   meta.Title,
+			Artist:  meta.Artist,
+			Matched: true,
+		})
 
 		slog.Info("track recognized", "title", meta.Title, "artist", meta.Artist, "extract_ms", extractMs, "recognize_ms", recognizeMs)
 
@@ -113,9 +110,11 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 				finalDuration = meta.Duration
 			}
 
-			if progressCb != nil {
-				progressCb("📤 در حال ارسال فایل صوتی...")
-			}
+			reportProgress(progress, domain.ProgressSending, ProgressDetail{
+				Title:   meta.Title,
+				Artist:  meta.Artist,
+				Matched: true,
+			})
 
 			return &domain.AudioPayload{
 				OriginalPath:  rawPath,
@@ -141,11 +140,8 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		slog.Info("unrecognized sound, using raw reel audio", "extract_ms", extractMs, "recognize_ms", recognizeMs)
 	}
 
-	if progressCb != nil {
-		progressCb("📤 آهنگ پیدا نشد. در حال ارسال صدای اصلی ویدیو...")
-	}
+	reportProgress(progress, domain.ProgressSending, ProgressDetail{Fallback: true})
 
-	// Fallback response
 	return &domain.AudioPayload{
 		OriginalPath: rawPath,
 		Title:        "Original Reel Audio",
@@ -153,4 +149,37 @@ func (uc *processReelUseCase) Execute(ctx context.Context, targetDir, reelURL st
 		FilePath:     rawPath,
 		IsFullTrack:  false,
 	}, nil
+}
+
+func (uc *processReelUseCase) resolveMetadata(ctx context.Context, reelURL, snippetPath string, cache domain.MetadataCache) (*domain.TrackMetadata, error) {
+	cacheKey := domain.NormalizeMediaURL(reelURL)
+	if cache != nil {
+		if cached, cacheErr := cache.Get(ctx, cacheKey); cacheErr == nil {
+			var cachedMeta domain.TrackMetadata
+			if jsonErr := json.Unmarshal(cached, &cachedMeta); jsonErr == nil && cachedMeta.IsMatched {
+				slog.Info("recognition metadata cache hit", "key", cacheKey)
+				return &cachedMeta, nil
+			}
+		}
+	}
+
+	meta, err := uc.recognizer.Identify(ctx, snippetPath)
+	if err == nil && meta != nil && meta.IsMatched {
+		return meta, nil
+	}
+
+	if uc.urlRecognizer == nil {
+		return meta, err
+	}
+
+	tUrl := time.Now()
+	urlCtx, cancelUrl := context.WithTimeout(ctx, 3*time.Second)
+	urlMeta, urlErr := uc.urlRecognizer.IdentifyByURL(urlCtx, reelURL)
+	cancelUrl()
+
+	if urlErr == nil && urlMeta != nil && urlMeta.IsMatched {
+		slog.Info("url metadata scraping matched", "url_recognize_ms", time.Since(tUrl).Milliseconds())
+		return urlMeta, nil
+	}
+	return meta, err
 }

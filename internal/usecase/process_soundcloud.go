@@ -20,10 +20,8 @@ func NewProcessSoundCloudUseCase(d domain.SoundCloudTrackDownloader) SoundCloudA
 	}
 }
 
-func (uc *processSoundCloudUseCase) Execute(ctx context.Context, targetDir, soundCloudURL string, progressCb func(string)) (*domain.AudioPayload, error) {
-	if progressCb != nil {
-		progressCb("📥 در حال دریافت اطلاعات و دانلود از ساندکلاد...")
-	}
+func (uc *processSoundCloudUseCase) Execute(ctx context.Context, targetDir, soundCloudURL string, progress ProgressReporter) (*domain.AudioPayload, error) {
+	reportProgress(progress, domain.ProgressDownloading, ProgressDetail{})
 
 	t0 := time.Now()
 	payload, err := uc.downloader.DownloadTrack(ctx, targetDir, soundCloudURL)
@@ -39,7 +37,6 @@ func (uc *processSoundCloudUseCase) Execute(ctx context.Context, targetDir, soun
 		return nil, fmt.Errorf("%w: empty audio payload", domain.ErrSoundCloudDownloadFailed)
 	}
 
-	// Invariants & metadata defaults
 	payload.IsFullTrack = true
 	if payload.SoundCloudURL == "" {
 		payload.SoundCloudURL = soundCloudURL
@@ -58,9 +55,11 @@ func (uc *processSoundCloudUseCase) Execute(ctx context.Context, targetDir, soun
 		"download_ms", downloadMs,
 	)
 
-	if progressCb != nil {
-		progressCb("📤 در حال ارسال فایل صوتی...")
-	}
+	reportProgress(progress, domain.ProgressSending, ProgressDetail{
+		Title:   payload.Title,
+		Artist:  payload.Performer,
+		Matched: true,
+	})
 
 	return payload, nil
 }

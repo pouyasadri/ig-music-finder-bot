@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"telegram-audio-bot/internal/domain"
+	"telegram-audio-bot/internal/usecase"
 )
 
 func TestStateMessageAndFormatting(t *testing.T) {
-	if got := StateMessage(StateRecognizing); got != "🎵 در حال شناسایی آهنگ" {
+	if got := StateMessage(StateRecognizing); got != "🎵 در حال تشخیص آهنگ..." {
 		t.Fatalf("unexpected state message: %s", got)
 	}
 	if got := FormatDuration(125); got != "02:05" {
@@ -17,6 +18,13 @@ func TestStateMessageAndFormatting(t *testing.T) {
 	}
 	if got := RequestLabel("completed"); got != "✅ تکمیل شد" {
 		t.Fatalf("unexpected request label: %s", got)
+	}
+}
+
+func TestFormatProgressMatchedDownload(t *testing.T) {
+	got := FormatProgress(domain.ProgressDownloading, usecase.ProgressDetail{Title: "Song", Matched: true})
+	if got == "" || !strings.Contains(got, "Song") {
+		t.Fatalf("unexpected progress copy: %s", got)
 	}
 }
 

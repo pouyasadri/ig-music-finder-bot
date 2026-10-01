@@ -2,8 +2,10 @@ package usecase_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"telegram-audio-bot/internal/domain"
 	"telegram-audio-bot/internal/usecase"
@@ -19,9 +21,11 @@ func (m *mockExtractor) ExtractReel(ctx context.Context, dir, url string) (strin
 
 type mockRecognizer struct {
 	IdentifyFunc func(ctx context.Context, snippet string) (*domain.TrackMetadata, error)
+	calls        int
 }
 
 func (m *mockRecognizer) Identify(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
+	m.calls++
 	return m.IdentifyFunc(ctx, snippet)
 }
 
@@ -31,6 +35,37 @@ type mockDownloader struct {
 
 func (m *mockDownloader) Download(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
 	return m.DownloadFunc(ctx, dir, query, expectedDuration)
+}
+
+type mockMetadataCache struct {
+	data map[string][]byte
+}
+
+func (m *mockMetadataCache) Get(ctx context.Context, key string) ([]byte, error) {
+	if m.data == nil {
+		return nil, errors.New("miss")
+	}
+	value, ok := m.data[key]
+	if !ok {
+		return nil, errors.New("miss")
+	}
+	return value, nil
+}
+
+func (m *mockMetadataCache) Set(ctx context.Context, key string, value []byte, expiresAt time.Time) error {
+	if m.data == nil {
+		m.data = map[string][]byte{}
+	}
+	m.data[key] = append([]byte(nil), value...)
+	return nil
+}
+
+type recordingProgress struct {
+	stages []domain.ProgressStage
+}
+
+func (r *recordingProgress) Report(stage domain.ProgressStage, detail usecase.ProgressDetail) {
+	r.stages = append(r.stages, stage)
 }
 
 func TestProcessReelAudio(t *testing.T) {
@@ -60,14 +95,21 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
+		progress := &recordingProgress{}
 		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", progress)
 
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
 		if !res.IsFullTrack || res.Title != "Song A" || res.Performer != "Artist B" || res.ThumbnailPath != "/tmp/cover.jpg" || res.Duration != 210 {
 			t.Errorf("unexpected output payload: %+v", res)
+		}
+		if len(progress.stages) < 3 {
+			t.Fatalf("expected progress stages, got %v", progress.stages)
+		}
+		if progress.stages[0] != domain.ProgressExtracting || progress.stages[1] != domain.ProgressRecognizing {
+			t.Fatalf("unexpected early stages: %v", progress.stages)
 		}
 	})
 
@@ -210,6 +252,45 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		if res != nil {
 			t.Errorf("expected nil result on error, got: %+v", res)
+		}
+	})
+
+	t.Run("cache decorator reuses recognition metadata", func(t *testing.T) {
+		meta := domain.TrackMetadata{Title: "Cached", Artist: "Artist", IsMatched: true, Duration: 120}
+		encoded, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache := &mockMetadataCache{data: map[string][]byte{
+			domain.NormalizeMediaURL("https://instagram.com/reel/cached"): encoded,
+		}}
+		recognizer := &mockRecognizer{
+			IdentifyFunc: func(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
+				t.Fatal("recognizer should not be called on cache hit")
+				return nil, nil
+			},
+		}
+		extractor := &mockExtractor{
+			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
+				return "/tmp/raw.mp3", "/tmp/snippet.mp3", nil
+			},
+		}
+		downloader := &mockDownloader{
+			DownloadFunc: func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
+				return "/tmp/full.mp3", "", 120, nil
+			},
+		}
+
+		uc := usecase.NewCachedProcessReelUseCase(extractor, recognizer, nil, downloader, cache, time.Hour)
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/cached", usecase.NopProgress())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Title != "Cached" || !res.IsFullTrack {
+			t.Fatalf("unexpected payload: %+v", res)
+		}
+		if recognizer.calls != 0 {
+			t.Fatalf("expected 0 recognizer calls, got %d", recognizer.calls)
 		}
 	})
 }

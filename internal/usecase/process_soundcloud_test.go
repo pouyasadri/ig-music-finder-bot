@@ -23,10 +23,7 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 	trackURL := "https://soundcloud.com/artist-name/track-name"
 
 	t.Run("success: downloads track directly with metadata and without recognition", func(t *testing.T) {
-		var progressMessages []string
-		progressCb := func(msg string) {
-			progressMessages = append(progressMessages, msg)
-		}
+		progress := &recordingProgress{}
 
 		downloader := &mockSoundCloudTrackDownloader{
 			DownloadTrackFunc: func(ctx context.Context, dir, url string) (*domain.AudioPayload, error) {
@@ -44,7 +41,7 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 		}
 
 		uc := usecase.NewProcessSoundCloudUseCase(downloader)
-		payload, err := uc.Execute(ctx, testDir, trackURL, progressCb)
+		payload, err := uc.Execute(ctx, testDir, trackURL, progress)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -67,8 +64,11 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 		if payload.Duration != 195 {
 			t.Errorf("expected duration 195, got %d", payload.Duration)
 		}
-		if len(progressMessages) < 2 {
-			t.Errorf("expected at least 2 progress messages, got %d", len(progressMessages))
+		if len(progress.stages) < 2 {
+			t.Errorf("expected at least 2 progress stages, got %d", len(progress.stages))
+		}
+		if progress.stages[0] != domain.ProgressDownloading || progress.stages[1] != domain.ProgressSending {
+			t.Errorf("unexpected stages: %v", progress.stages)
 		}
 	})
 
