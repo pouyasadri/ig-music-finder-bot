@@ -69,13 +69,11 @@ func main() {
 		metadataCache,
 		cfg.CacheTTL,
 	)
-	processReelUC := usecase.NewProcessReelUseCaseWithResolver(mediaExtractor, metadataResolver, musicDownloader)
-	processSoundCloudUC := usecase.NewProcessSoundCloudUseCase(soundCloudDownloader)
+	processMediaUC := usecase.NewProcessMediaUseCase(mediaExtractor, metadataResolver, musicDownloader, soundCloudDownloader)
 
 	rateLimiter := sqlite.NewRateLimitRepository(db)
 	leases := sqlite.NewLeaseRepository(db)
-	botHandler := telegram.NewProtectedBotHandler(cfg.BotToken, processReelUC, cfg.WorkerCount, cfg.QueueLimit, cfg.ChannelID, rateLimiter, leases, cfg.RateLimit, cfg.RateWindow, cfg.LeaseTTL, cfg.RequestTimeout).
-		WithSoundCloudUseCase(processSoundCloudUC).
+	botHandler := telegram.NewProtectedBotHandler(cfg.BotToken, processMediaUC, cfg.WorkerCount, cfg.QueueLimit, cfg.ChannelID, rateLimiter, leases, cfg.RateLimit, cfg.RateWindow, cfg.LeaseTTL, cfg.RequestTimeout).
 		WithRepositories(
 			sqlite.NewUserRepository(db),
 			sqlite.NewSettingsRepository(db),

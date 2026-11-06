@@ -68,9 +68,16 @@ func (r *recordingProgress) Report(stage domain.ProgressStage, detail usecase.Pr
 	r.stages = append(r.stages, stage)
 }
 
-func TestProcessReelAudio(t *testing.T) {
+func mediaIn(url string) usecase.ProcessMediaInput {
+	return usecase.ProcessMediaInput{
+		Kind:      domain.SourceKindInstagram,
+		SourceURL: url,
+		WorkDir:   "/tmp/test",
+	}
+}
+
+func TestProcessMediaRecognized(t *testing.T) {
 	ctx := context.Background()
-	testDir := "/tmp/test"
 
 	t.Run("success: recognized and downloaded full track", func(t *testing.T) {
 		extractor := &mockExtractor{
@@ -96,8 +103,8 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 
 		progress := &recordingProgress{}
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", progress)
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/123"), progress)
 
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
@@ -126,8 +133,8 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		downloader := &mockDownloader{}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/123"), nil)
 
 		if err != nil {
 			t.Fatalf("expected successful fallback, got: %v", err)
@@ -154,8 +161,8 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/123"), nil)
 
 		if err != nil {
 			t.Fatalf("expected fallback on download failure, got: %v", err)
@@ -182,8 +189,8 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/123"), nil)
 
 		if err != nil {
 			t.Fatalf("expected raw fallback, got: %v", err)
@@ -218,8 +225,8 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/123"), nil)
 
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
@@ -241,8 +248,8 @@ func TestProcessReelAudio(t *testing.T) {
 		recognizer := &mockRecognizer{}
 		downloader := &mockDownloader{}
 
-		uc := usecase.NewProcessReelUseCase(extractor, recognizer, nil, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/123", nil)
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/123"), nil)
 
 		if err == nil {
 			t.Fatalf("expected error on extraction failure, got nil")
@@ -286,8 +293,8 @@ func TestProcessReelAudio(t *testing.T) {
 			cache,
 			time.Hour,
 		)
-		uc := usecase.NewProcessReelUseCaseWithResolver(extractor, resolver, downloader)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/cached", usecase.NopProgress())
+		uc := usecase.NewProcessMediaUseCase(extractor, resolver, downloader, nil)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/cached"), usecase.NopProgress())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -299,7 +306,7 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 	})
 
-	t.Run("NewCachedProcessReelUseCase helper wires cache decorator", func(t *testing.T) {
+	t.Run("NewCachedProcessMediaUseCase helper wires cache decorator", func(t *testing.T) {
 		meta := domain.TrackMetadata{Title: "Helper", Artist: "A", IsMatched: true, Duration: 100}
 		encoded, _ := json.Marshal(meta)
 		cache := &mockMetadataCache{data: map[string][]byte{
@@ -321,10 +328,27 @@ func TestProcessReelAudio(t *testing.T) {
 				return "/tmp/full.mp3", "", 100, nil
 			},
 		}
-		uc := usecase.NewCachedProcessReelUseCase(extractor, recognizer, nil, downloader, cache, time.Hour)
-		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/helper", nil)
+		uc := usecase.NewCachedProcessMediaUseCase(extractor, recognizer, nil, downloader, nil, cache, time.Hour)
+		res, err := uc.Execute(ctx, mediaIn("https://instagram.com/reel/helper"), nil)
 		if err != nil || res.Title != "Helper" {
 			t.Fatalf("got %+v err=%v", res, err)
 		}
 	})
+}
+
+func TestInferSourceKind(t *testing.T) {
+	cases := []struct {
+		url  string
+		want domain.SourceKind
+	}{
+		{"https://soundcloud.com/a/b", domain.SourceKindSoundCloud},
+		{"https://on.soundcloud.com/xyz", domain.SourceKindSoundCloud},
+		{"file:///tmp/audio.mp3", domain.SourceKindUpload},
+		{"https://instagram.com/reel/123", domain.SourceKindInstagram},
+	}
+	for _, tc := range cases {
+		if got := usecase.InferSourceKind(tc.url); got != tc.want {
+			t.Errorf("InferSourceKind(%q)=%q want %q", tc.url, got, tc.want)
+		}
+	}
 }

@@ -83,7 +83,11 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 		})
 	})
 
-	payload, err := h.executeUseCase(workCtx, workDir, job.SourceKind, sourceURL, progress)
+	payload, err := h.mediaUC.Execute(workCtx, usecase.ProcessMediaInput{
+		Kind:      job.SourceKind,
+		SourceURL: sourceURL,
+		WorkDir:   workDir,
+	}, progress)
 	if err != nil {
 		slog.Error("failed to process media", "chat_id", job.ChatID, "err", err, "url", sourceURL, "source_kind", job.SourceKind)
 		h.delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
@@ -112,16 +116,4 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 		"upload_ms", result.UploadMs,
 		"total_ms", time.Since(startTime).Milliseconds(),
 	)
-}
-
-func (h *BotHandler) executeUseCase(ctx context.Context, workDir string, kind domain.SourceKind, sourceURL string, progress usecase.ProgressReporter) (*domain.AudioPayload, error) {
-	switch kind {
-	case domain.SourceKindSoundCloud:
-		if h.soundCloudUC == nil {
-			return nil, fmt.Errorf("%w: soundcloud processing is not configured", domain.ErrInvalidInput)
-		}
-		return h.soundCloudUC.Execute(ctx, workDir, sourceURL, progress)
-	default:
-		return h.useCase.Execute(ctx, workDir, sourceURL, progress)
-	}
 }

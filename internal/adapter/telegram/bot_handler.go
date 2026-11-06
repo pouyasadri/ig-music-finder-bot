@@ -24,27 +24,26 @@ var (
 )
 
 type BotHandler struct {
-	token        string
-	useCase      usecase.ReelAudioUseCase
-	soundCloudUC usecase.SoundCloudAudioUseCase
-	admission    *Admission
-	workers      *WorkerPool
-	delivery     *Delivery
-	commands     *Commands
-	callbacks    *Callbacks
-	router       *CallbackRouter
-	channelID    string
-	users        domain.UserRepository
-	settings     domain.SettingsRepository
-	requests     domain.RequestRepository
-	tracks       domain.TrackRepository
-	favorites    domain.FavoriteRepository
+	token     string
+	mediaUC   usecase.ProcessMediaUseCase
+	admission *Admission
+	workers   *WorkerPool
+	delivery  *Delivery
+	commands  *Commands
+	callbacks *Callbacks
+	router    *CallbackRouter
+	channelID string
+	users     domain.UserRepository
+	settings  domain.SettingsRepository
+	requests  domain.RequestRepository
+	tracks    domain.TrackRepository
+	favorites domain.FavoriteRepository
 }
 
-func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, channelID string) *BotHandler {
+func NewBotHandler(token string, uc usecase.ProcessMediaUseCase, maxWorkers int, channelID string) *BotHandler {
 	h := &BotHandler{
 		token:     token,
-		useCase:   uc,
+		mediaUC:   uc,
 		workers:   NewWorkerPool(maxWorkers, 0),
 		delivery:  NewDelivery(channelID, nil, nil, nil),
 		channelID: channelID,
@@ -54,7 +53,7 @@ func NewBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers int, ch
 	return h
 }
 
-func NewProtectedBotHandler(token string, uc usecase.ReelAudioUseCase, maxWorkers, queueLimit int, channelID string, rateLimiter domain.RateLimiter, leases domain.Lease, rateLimit int, rateWindow, leaseTTL, requestTTL time.Duration) *BotHandler {
+func NewProtectedBotHandler(token string, uc usecase.ProcessMediaUseCase, maxWorkers, queueLimit int, channelID string, rateLimiter domain.RateLimiter, leases domain.Lease, rateLimit int, rateWindow, leaseTTL, requestTTL time.Duration) *BotHandler {
 	h := NewBotHandler(token, uc, maxWorkers, channelID)
 	h.workers = NewWorkerPool(maxWorkers, requestTTL)
 	h.admission = NewAdmission(rateLimiter, leases, maxWorkers, queueLimit, rateLimit, rateWindow, leaseTTL)
@@ -65,11 +64,6 @@ func (h *BotHandler) WithRepositories(users domain.UserRepository, settings doma
 	h.users, h.settings, h.requests, h.tracks, h.favorites = users, settings, requests, tracks, favorites
 	h.delivery = NewDelivery(h.channelID, tracks, requests, settings)
 	h.rebuildPresentation()
-	return h
-}
-
-func (h *BotHandler) WithSoundCloudUseCase(uc usecase.SoundCloudAudioUseCase) *BotHandler {
-	h.soundCloudUC = uc
 	return h
 }
 

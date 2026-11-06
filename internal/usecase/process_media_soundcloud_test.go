@@ -17,9 +17,16 @@ func (m *mockSoundCloudTrackDownloader) DownloadTrack(ctx context.Context, targe
 	return m.DownloadTrackFunc(ctx, targetDir, url)
 }
 
-func TestProcessSoundCloudAudio(t *testing.T) {
+func scIn(url string) usecase.ProcessMediaInput {
+	return usecase.ProcessMediaInput{
+		Kind:      domain.SourceKindSoundCloud,
+		SourceURL: url,
+		WorkDir:   "/tmp/test",
+	}
+}
+
+func TestProcessMediaSoundCloud(t *testing.T) {
 	ctx := context.Background()
-	testDir := "/tmp/test"
 	trackURL := "https://soundcloud.com/artist-name/track-name"
 
 	t.Run("success: downloads track directly with metadata and without recognition", func(t *testing.T) {
@@ -27,7 +34,7 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 
 		downloader := &mockSoundCloudTrackDownloader{
 			DownloadTrackFunc: func(ctx context.Context, dir, url string) (*domain.AudioPayload, error) {
-				if dir != testDir || url != trackURL {
+				if dir != "/tmp/test" || url != trackURL {
 					t.Errorf("unexpected args: dir=%s, url=%s", dir, url)
 				}
 				return &domain.AudioPayload{
@@ -40,8 +47,8 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessSoundCloudUseCase(downloader)
-		payload, err := uc.Execute(ctx, testDir, trackURL, progress)
+		uc := usecase.NewProcessMediaUseCase(nil, nil, nil, downloader)
+		payload, err := uc.Execute(ctx, scIn(trackURL), progress)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -81,8 +88,8 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessSoundCloudUseCase(downloader)
-		payload, err := uc.Execute(ctx, testDir, trackURL, nil)
+		uc := usecase.NewProcessMediaUseCase(nil, nil, nil, downloader)
+		payload, err := uc.Execute(ctx, scIn(trackURL), nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -102,8 +109,8 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessSoundCloudUseCase(downloader)
-		payload, err := uc.Execute(ctx, testDir, trackURL, nil)
+		uc := usecase.NewProcessMediaUseCase(nil, nil, nil, downloader)
+		payload, err := uc.Execute(ctx, scIn(trackURL), nil)
 
 		if err == nil {
 			t.Fatalf("expected error, got nil")
@@ -123,14 +130,25 @@ func TestProcessSoundCloudAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewProcessSoundCloudUseCase(downloader)
-		_, err := uc.Execute(ctx, testDir, trackURL, nil)
+		uc := usecase.NewProcessMediaUseCase(nil, nil, nil, downloader)
+		_, err := uc.Execute(ctx, scIn(trackURL), nil)
 
 		if err == nil {
 			t.Fatalf("expected error for empty file path, got nil")
 		}
 		if !errors.Is(err, domain.ErrSoundCloudDownloadFailed) {
 			t.Errorf("expected ErrSoundCloudDownloadFailed, got: %v", err)
+		}
+	})
+
+	t.Run("error: missing soundcloud downloader", func(t *testing.T) {
+		uc := usecase.NewProcessMediaUseCase(nil, nil, nil, nil)
+		_, err := uc.Execute(ctx, scIn(trackURL), nil)
+		if err == nil {
+			t.Fatalf("expected error when soundcloud is not configured")
+		}
+		if !errors.Is(err, domain.ErrInvalidInput) {
+			t.Errorf("expected ErrInvalidInput, got: %v", err)
 		}
 	})
 }
