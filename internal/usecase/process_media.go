@@ -39,7 +39,7 @@ func NewProcessMediaUseCaseFromRecognizers(
 	downloader domain.MusicDownloader,
 	soundCloudDownloader domain.SoundCloudTrackDownloader,
 ) ProcessMediaUseCase {
-	return NewProcessMediaUseCase(extractor, NewTrackMetadataResolver(recognizer, urlRecognizer), downloader, soundCloudDownloader)
+	return NewProcessMediaUseCase(extractor, NewTrackMetadataResolver(recognizer, urlRecognizer, 0), downloader, soundCloudDownloader)
 }
 
 // NewCachedProcessMediaUseCase wires a cached metadata resolver into ProcessMedia.
@@ -52,7 +52,7 @@ func NewCachedProcessMediaUseCase(
 	cache domain.MetadataCache,
 	cacheTTL time.Duration,
 ) ProcessMediaUseCase {
-	resolver := NewCachedTrackMetadataResolver(NewTrackMetadataResolver(recognizer, urlRecognizer), cache, cacheTTL)
+	resolver := NewCachedTrackMetadataResolver(NewTrackMetadataResolver(recognizer, urlRecognizer, 0), cache, cacheTTL)
 	return NewProcessMediaUseCase(extractor, resolver, downloader, soundCloudDownloader)
 }
 

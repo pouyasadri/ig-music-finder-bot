@@ -14,18 +14,21 @@ import (
 
 type YtDlpExtractor struct {
 	cookiesPath string
+	timeout     time.Duration
 }
 
-func NewYtDlpExtractor(cookiesPath string) domain.MediaExtractor {
-	return &YtDlpExtractor{cookiesPath: cookiesPath}
+func NewYtDlpExtractor(cookiesPath string, timeout time.Duration) domain.MediaExtractor {
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	return &YtDlpExtractor{cookiesPath: cookiesPath, timeout: timeout}
 }
 
 func (e *YtDlpExtractor) ExtractReel(ctx context.Context, targetDir, url string) (string, string, error) {
 	outputPattern := filepath.Join(targetDir, "raw_reel.%(ext)s")
 	snippetPath := filepath.Join(targetDir, "snippet.mp3")
 
-	// Set a bounded timeout context for reel extraction
-	extractCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	extractCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	if strings.HasPrefix(url, "file://") {
 		rawPath := filepath.Join(targetDir, "raw_reel.mp4")

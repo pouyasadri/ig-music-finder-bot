@@ -15,22 +15,27 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-const maxUploadBytes = 49 * 1024 * 1024
+const defaultMaxUploadBytes = 49 * 1024 * 1024
 
 // Delivery sends processed audio payloads back to Telegram users.
 type Delivery struct {
-	channelID string
-	tracks    domain.TrackRepository
-	requests  domain.RequestRepository
-	settings  domain.SettingsRepository
+	channelID      string
+	maxUploadBytes int64
+	tracks         domain.TrackRepository
+	requests       domain.RequestRepository
+	settings       domain.SettingsRepository
 }
 
-func NewDelivery(channelID string, tracks domain.TrackRepository, requests domain.RequestRepository, settings domain.SettingsRepository) *Delivery {
+func NewDelivery(channelID string, tracks domain.TrackRepository, requests domain.RequestRepository, settings domain.SettingsRepository, maxUploadBytes int64) *Delivery {
+	if maxUploadBytes <= 0 {
+		maxUploadBytes = defaultMaxUploadBytes
+	}
 	return &Delivery{
-		channelID: channelID,
-		tracks:    tracks,
-		requests:  requests,
-		settings:  settings,
+		channelID:      channelID,
+		maxUploadBytes: maxUploadBytes,
+		tracks:         tracks,
+		requests:       requests,
+		settings:       settings,
 	}
 }
 
@@ -62,7 +67,7 @@ func (d *Delivery) SendAudio(ctx context.Context, b *bot.Bot, chatID int64, stat
 	if err != nil {
 		return nil, err
 	}
-	if fileInfo.Size() > maxUploadBytes {
+	if fileInfo.Size() > d.maxUploadBytes {
 		return nil, domain.ErrFileTooLarge
 	}
 

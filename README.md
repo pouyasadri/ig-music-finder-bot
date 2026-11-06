@@ -16,10 +16,11 @@ An open-access Telegram bot written in Go following Clean Architecture.
 
 ```
 .
-├── cmd/bot/main.go                 # composition root
+├── cmd/bot/main.go                 # load config, signals, app.Start
 ├── internal/
+│   ├── app/                        # composition root (wiring)
 │   ├── domain/                     # entities + ports (DIP boundary)
-│   ├── usecase/                    # orchestration (reel + soundcloud)
+│   ├── usecase/                    # ProcessMedia orchestration
 │   ├── adapter/
 │   │   ├── extractor/              # yt-dlp reel extraction
 │   │   ├── recognizer/             # Shazam / AudD / ACR / scrape + fallback
@@ -35,7 +36,7 @@ An open-access Telegram bot written in Go following Clean Architecture.
 └── go.sum
 ```
 
-Dependency rule: `cmd → adapter/storage → usecase → domain`.
+Dependency rule: `cmd → app → adapter/storage → usecase → domain`.
 
 ## Running Unit Tests
 
@@ -48,14 +49,15 @@ go test ./...
 1. Copy and configure environment variables in `.env`:
    ```env
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-   ACR_HOST=identify-eu-west-1.acrcloud.com
-   ACR_KEY=your_acr_access_key
-   ACR_SECRET=your_acr_access_secret
+   # At least one recognizer is required (Shazam script path defaults on):
+   # ACR_HOST=identify-eu-west-1.acrcloud.com
+   # ACR_KEY=your_acr_access_key
+   # ACR_SECRET=your_acr_access_secret
+   # AUDD_API_TOKEN=
+   SHAZAM_SCRIPT_PATH=/app/scripts/shazam_recognize.py
    # Optional
-   AUDD_API_TOKEN=
    CHANNEL_ID=
    COOKIES_PATH=/app/cookies.txt
-   SHAZAM_SCRIPT_PATH=/app/scripts/shazam_recognize.py
    DATABASE_PATH=/app/data/bot.db
    WORKER_COUNT=5
    QUEUE_LIMIT=20
@@ -64,7 +66,18 @@ go test ./...
    REQUEST_TIMEOUT=3m
    LEASE_TTL=5m
    CACHE_TTL=24h
+   MAX_UPLOAD_BYTES=51380224
+   EXTRACT_TIMEOUT=60s
+   YOUTUBE_DOWNLOAD_TIMEOUT=90s
+   SOUNDCLOUD_DOWNLOAD_TIMEOUT=45s
+   RECOGNIZE_SHAZAM_TIMEOUT=4s
+   RECOGNIZE_AUDD_TIMEOUT=3s
+   RECOGNIZE_ACR_TIMEOUT=3s
+   RECOGNIZE_SCRAPE_TIMEOUT=3s
+   AUDD_HTTP_TIMEOUT=5s
    ```
+
+   Recognizers are wired only when configured. ACR credentials must be set as a complete trio when used. AudD and Shazam are optional add-ons.
 
 2. (Optional) Provide Instagram `cookies.txt` for authenticated downloads:
    ```bash

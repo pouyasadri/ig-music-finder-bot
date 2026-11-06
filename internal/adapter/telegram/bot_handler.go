@@ -24,31 +24,33 @@ var (
 )
 
 type BotHandler struct {
-	token     string
-	mediaUC   usecase.ProcessMediaUseCase
-	admission *Admission
-	workers   *WorkerPool
-	delivery  *Delivery
-	commands  *Commands
-	callbacks *Callbacks
-	router    *CallbackRouter
-	channelID string
-	users     domain.UserRepository
-	settings  domain.SettingsRepository
-	requests  domain.RequestRepository
-	tracks    domain.TrackRepository
-	favorites domain.FavoriteRepository
+	token          string
+	mediaUC        usecase.ProcessMediaUseCase
+	admission      *Admission
+	workers        *WorkerPool
+	delivery       *Delivery
+	commands       *Commands
+	callbacks      *Callbacks
+	router         *CallbackRouter
+	channelID      string
+	maxUploadBytes int64
+	users          domain.UserRepository
+	settings       domain.SettingsRepository
+	requests       domain.RequestRepository
+	tracks         domain.TrackRepository
+	favorites      domain.FavoriteRepository
 }
 
 func NewBotHandler(token string, uc usecase.ProcessMediaUseCase, maxWorkers int, channelID string) *BotHandler {
 	h := &BotHandler{
-		token:     token,
-		mediaUC:   uc,
-		workers:   NewWorkerPool(maxWorkers, 0),
-		delivery:  NewDelivery(channelID, nil, nil, nil),
-		channelID: channelID,
-		router:    NewCallbackRouter(),
+		token:          token,
+		mediaUC:        uc,
+		workers:        NewWorkerPool(maxWorkers, 0),
+		channelID:      channelID,
+		maxUploadBytes: defaultMaxUploadBytes,
+		router:         NewCallbackRouter(),
 	}
+	h.delivery = NewDelivery(channelID, nil, nil, nil, h.maxUploadBytes)
 	h.rebuildPresentation()
 	return h
 }
@@ -60,9 +62,17 @@ func NewProtectedBotHandler(token string, uc usecase.ProcessMediaUseCase, maxWor
 	return h
 }
 
+func (h *BotHandler) WithMaxUploadBytes(n int64) *BotHandler {
+	if n > 0 {
+		h.maxUploadBytes = n
+	}
+	h.delivery = NewDelivery(h.channelID, h.tracks, h.requests, h.settings, h.maxUploadBytes)
+	return h
+}
+
 func (h *BotHandler) WithRepositories(users domain.UserRepository, settings domain.SettingsRepository, requests domain.RequestRepository, tracks domain.TrackRepository, favorites domain.FavoriteRepository) *BotHandler {
 	h.users, h.settings, h.requests, h.tracks, h.favorites = users, settings, requests, tracks, favorites
-	h.delivery = NewDelivery(h.channelID, tracks, requests, settings)
+	h.delivery = NewDelivery(h.channelID, tracks, requests, settings, h.maxUploadBytes)
 	h.rebuildPresentation()
 	return h
 }

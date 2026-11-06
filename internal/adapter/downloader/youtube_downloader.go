@@ -11,10 +11,15 @@ import (
 	"time"
 )
 
-type YouTubeDownloader struct{}
+type YouTubeDownloader struct {
+	timeout time.Duration
+}
 
-func NewYouTubeDownloader() domain.MusicDownloader {
-	return &YouTubeDownloader{}
+func NewYouTubeDownloader(timeout time.Duration) domain.MusicDownloader {
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	return &YouTubeDownloader{timeout: timeout}
 }
 
 func (d *YouTubeDownloader) Download(ctx context.Context, targetDir, target string, expectedDuration int) (string, string, int, error) {
@@ -27,8 +32,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, targetDir, target stri
 		targetInput = fmt.Sprintf("ytsearch1:%s", target)
 	}
 
-	// Bounded timeout context for YouTube search/download
-	downloadCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	downloadCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(downloadCtx, "yt-dlp",

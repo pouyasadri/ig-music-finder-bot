@@ -12,10 +12,15 @@ import (
 	"telegram-audio-bot/internal/domain"
 )
 
-type SoundCloudDownloader struct{}
+type SoundCloudDownloader struct {
+	timeout time.Duration
+}
 
-func NewSoundCloudDownloader() *SoundCloudDownloader {
-	return &SoundCloudDownloader{}
+func NewSoundCloudDownloader(timeout time.Duration) *SoundCloudDownloader {
+	if timeout <= 0 {
+		timeout = 45 * time.Second
+	}
+	return &SoundCloudDownloader{timeout: timeout}
 }
 
 func (d *SoundCloudDownloader) DownloadTrack(ctx context.Context, targetDir, url string) (*domain.AudioPayload, error) {
@@ -41,8 +46,7 @@ func (d *SoundCloudDownloader) Download(ctx context.Context, targetDir, target s
 		targetInput = fmt.Sprintf("scsearch3:%s", target)
 	}
 
-	// SoundCloud downloads are much faster, 45s bounded timeout
-	downloadCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	downloadCtx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(downloadCtx, "yt-dlp",

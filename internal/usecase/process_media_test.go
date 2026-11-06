@@ -289,7 +289,7 @@ func TestProcessMediaRecognized(t *testing.T) {
 		}
 
 		resolver := usecase.NewCachedTrackMetadataResolver(
-			usecase.NewTrackMetadataResolver(recognizer, nil),
+			usecase.NewTrackMetadataResolver(recognizer, nil, 0),
 			cache,
 			time.Hour,
 		)

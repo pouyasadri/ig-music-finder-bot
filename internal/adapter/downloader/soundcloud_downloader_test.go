@@ -11,7 +11,7 @@ import (
 )
 
 func TestSoundCloudDownloaderInterfaceCompliance(t *testing.T) {
-	sc := downloader.NewSoundCloudDownloader()
+	sc := downloader.NewSoundCloudDownloader(0)
 
 	// Verify compliance with both usecase interfaces
 	var _ domain.MusicDownloader = sc

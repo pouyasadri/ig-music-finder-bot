@@ -17,10 +17,14 @@ type TrackMetadataResolver interface {
 type trackMetadataResolver struct {
 	recognizer    domain.MusicRecognizer
 	urlRecognizer domain.URLMusicRecognizer
+	scrapeTimeout time.Duration
 }
 
-func NewTrackMetadataResolver(r domain.MusicRecognizer, u domain.URLMusicRecognizer) TrackMetadataResolver {
-	return &trackMetadataResolver{recognizer: r, urlRecognizer: u}
+func NewTrackMetadataResolver(r domain.MusicRecognizer, u domain.URLMusicRecognizer, scrapeTimeout time.Duration) TrackMetadataResolver {
+	if scrapeTimeout <= 0 {
+		scrapeTimeout = 3 * time.Second
+	}
+	return &trackMetadataResolver{recognizer: r, urlRecognizer: u, scrapeTimeout: scrapeTimeout}
 }
 
 func (r *trackMetadataResolver) Resolve(ctx context.Context, mediaURL, snippetPath string) (*domain.TrackMetadata, error) {
@@ -34,7 +38,7 @@ func (r *trackMetadataResolver) Resolve(ctx context.Context, mediaURL, snippetPa
 	}
 
 	tURL := time.Now()
-	urlCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	urlCtx, cancel := context.WithTimeout(ctx, r.scrapeTimeout)
 	urlMeta, urlErr := r.urlRecognizer.IdentifyByURL(urlCtx, mediaURL)
 	cancel()
 
