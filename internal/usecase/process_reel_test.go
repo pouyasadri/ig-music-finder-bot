@@ -281,7 +281,12 @@ func TestProcessReelAudio(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewCachedProcessReelUseCase(extractor, recognizer, nil, downloader, cache, time.Hour)
+		resolver := usecase.NewCachedTrackMetadataResolver(
+			usecase.NewTrackMetadataResolver(recognizer, nil),
+			cache,
+			time.Hour,
+		)
+		uc := usecase.NewProcessReelUseCaseWithResolver(extractor, resolver, downloader)
 		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/cached", usecase.NopProgress())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -291,6 +296,35 @@ func TestProcessReelAudio(t *testing.T) {
 		}
 		if recognizer.calls != 0 {
 			t.Fatalf("expected 0 recognizer calls, got %d", recognizer.calls)
+		}
+	})
+
+	t.Run("NewCachedProcessReelUseCase helper wires cache decorator", func(t *testing.T) {
+		meta := domain.TrackMetadata{Title: "Helper", Artist: "A", IsMatched: true, Duration: 100}
+		encoded, _ := json.Marshal(meta)
+		cache := &mockMetadataCache{data: map[string][]byte{
+			domain.NormalizeMediaURL("https://instagram.com/reel/helper"): encoded,
+		}}
+		recognizer := &mockRecognizer{
+			IdentifyFunc: func(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
+				t.Fatal("should not identify on cache hit")
+				return nil, nil
+			},
+		}
+		extractor := &mockExtractor{
+			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
+				return "/tmp/raw.mp3", "/tmp/snippet.mp3", nil
+			},
+		}
+		downloader := &mockDownloader{
+			DownloadFunc: func(ctx context.Context, dir, query string, expectedDuration int) (string, string, int, error) {
+				return "/tmp/full.mp3", "", 100, nil
+			},
+		}
+		uc := usecase.NewCachedProcessReelUseCase(extractor, recognizer, nil, downloader, cache, time.Hour)
+		res, err := uc.Execute(ctx, testDir, "https://instagram.com/reel/helper", nil)
+		if err != nil || res.Title != "Helper" {
+			t.Fatalf("got %+v err=%v", res, err)
 		}
 	})
 }

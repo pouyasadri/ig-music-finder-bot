@@ -13,6 +13,7 @@ import (
 	"telegram-audio-bot/internal/adapter/downloader"
 	"telegram-audio-bot/internal/adapter/extractor"
 	"telegram-audio-bot/internal/adapter/recognizer"
+	"telegram-audio-bot/internal/adapter/recognizer/fallback"
 	"telegram-audio-bot/internal/adapter/telegram"
 	"telegram-audio-bot/internal/config"
 	"telegram-audio-bot/internal/storage/sqlite"
@@ -49,10 +50,10 @@ func main() {
 	acrRecognizer := recognizer.NewACRCloudRecognizer(cfg.ACRHost, cfg.ACRKey, cfg.ACRSecret)
 	shazamRecognizer := recognizer.NewShazamIORecognizer(cfg.ShazamScriptPath)
 	auddRecognizer := recognizer.NewAudDRecognizer(cfg.AuddToken, &http.Client{Timeout: 5 * time.Second})
-	compositeRecognizer := recognizer.NewFallbackRecognizer(
-		recognizer.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
-		recognizer.Engine{Name: "AudD", Recognizer: auddRecognizer, Timeout: 3 * time.Second},
-		recognizer.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
+	compositeRecognizer := fallback.New(
+		fallback.Engine{Name: "ShazamIO", Recognizer: shazamRecognizer, Timeout: 4 * time.Second},
+		fallback.Engine{Name: "AudD", Recognizer: auddRecognizer, Timeout: 3 * time.Second},
+		fallback.Engine{Name: "ACRCloud", Recognizer: acrRecognizer, Timeout: 3 * time.Second},
 	)
 	platformRecognizer := recognizer.NewPlatformScraperRecognizer(cfg.CookiesPath)
 	soundCloudDownloader := downloader.NewSoundCloudDownloader()
@@ -63,7 +64,12 @@ func main() {
 	)
 
 	metadataCache := sqlite.NewMetadataCacheAdapter(sqlite.NewCacheRepository(db))
-	processReelUC := usecase.NewCachedProcessReelUseCase(mediaExtractor, compositeRecognizer, platformRecognizer, musicDownloader, metadataCache, cfg.CacheTTL)
+	metadataResolver := usecase.NewCachedTrackMetadataResolver(
+		usecase.NewTrackMetadataResolver(compositeRecognizer, platformRecognizer),
+		metadataCache,
+		cfg.CacheTTL,
+	)
+	processReelUC := usecase.NewProcessReelUseCaseWithResolver(mediaExtractor, metadataResolver, musicDownloader)
 	processSoundCloudUC := usecase.NewProcessSoundCloudUseCase(soundCloudDownloader)
 
 	rateLimiter := sqlite.NewRateLimitRepository(db)

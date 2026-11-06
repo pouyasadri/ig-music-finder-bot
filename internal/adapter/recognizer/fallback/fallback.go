@@ -1,4 +1,4 @@
-package recognizer
+package fallback
 
 import (
 	"context"
@@ -10,17 +10,46 @@ import (
 	"telegram-audio-bot/internal/domain"
 )
 
-type FallbackRecognizer struct {
-	engines []Engine
+const (
+	defaultMinAcceptScore    = 0.7
+	defaultShortCircuitScore = 0.9
+)
+
+// Engine defines a concrete recognizer implementation together with its timeout budget.
+type Engine struct {
+	Name       string
+	Recognizer domain.MusicRecognizer
+	Timeout    time.Duration
+}
+
+// Recognizer tries engines in order, optionally short-circuiting on a strong match.
+type Recognizer struct {
+	engines           []Engine
+	minAcceptScore    float64
+	shortCircuitScore float64
 }
 
 var candidateKeyPattern = regexp.MustCompile(`[^a-z0-9]+`)
 
-func NewFallbackRecognizer(engines ...Engine) domain.MusicRecognizer {
-	return &FallbackRecognizer{engines: engines}
+func New(engines ...Engine) *Recognizer {
+	return &Recognizer{
+		engines:           engines,
+		minAcceptScore:    defaultMinAcceptScore,
+		shortCircuitScore: defaultShortCircuitScore,
+	}
 }
 
-func (f *FallbackRecognizer) Identify(ctx context.Context, snippetPath string) (*domain.TrackMetadata, error) {
+// WithScores configures acceptance and early-exit thresholds.
+// A shortCircuit <= 0 disables short-circuiting.
+func (f *Recognizer) WithScores(minAccept, shortCircuit float64) *Recognizer {
+	if minAccept > 0 {
+		f.minAcceptScore = minAccept
+	}
+	f.shortCircuitScore = shortCircuit
+	return f
+}
+
+func (f *Recognizer) Identify(ctx context.Context, snippetPath string) (*domain.TrackMetadata, error) {
 	candidates := make([]domain.RecognitionCandidate, 0, len(f.engines))
 	for _, engine := range f.engines {
 		slog.Info("attempting music recognition", "engine", engine.Name)
@@ -37,6 +66,11 @@ func (f *FallbackRecognizer) Identify(ctx context.Context, snippetPath string) (
 			candidate := domain.RecognitionCandidate{Provider: engine.Name, Metadata: meta, Score: score}
 			candidates = append(candidates, candidate)
 			slog.Info("recognition successful", "engine", engine.Name, "title", meta.Title, "artist", meta.Artist, "score", score, "elapsed_ms", elapsed)
+
+			if f.shortCircuitScore > 0 && score+1e-9 >= f.shortCircuitScore {
+				slog.Info("recognition short-circuit", "engine", engine.Name, "score", score, "threshold", f.shortCircuitScore)
+				return meta, nil
+			}
 			continue
 		}
 
@@ -44,7 +78,7 @@ func (f *FallbackRecognizer) Identify(ctx context.Context, snippetPath string) (
 	}
 
 	winner := selectBestRecognitionCandidate(candidates)
-	if winner == nil || winner.Score < 0.7 {
+	if winner == nil || winner.Score < f.minAcceptScore {
 		return &domain.TrackMetadata{IsMatched: false}, nil
 	}
 
@@ -69,10 +103,11 @@ func scoreRecognitionCandidate(meta *domain.TrackMetadata) float64 {
 	if strings.TrimSpace(meta.SpotifyURL) != "" || strings.TrimSpace(meta.YouTubeURL) != "" {
 		score += 0.1
 	}
-	if strings.Contains(strings.ToLower(strings.TrimSpace(meta.Title)), "unknown") || strings.Contains(strings.ToLower(strings.TrimSpace(meta.Title)), "unmatched") {
+	title := strings.ToLower(strings.TrimSpace(meta.Title))
+	if strings.Contains(title, "unknown") || strings.Contains(title, "unmatched") {
 		score -= 0.25
 	}
-	if strings.Contains(strings.ToLower(strings.TrimSpace(meta.Title)), "original") {
+	if strings.Contains(title, "original") {
 		score -= 0.15
 	}
 	if score < 0 {
