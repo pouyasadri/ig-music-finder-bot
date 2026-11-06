@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.4
 
 # Stage 1: Dependency & Binary Builder
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.27-bookworm AS builder
 
 WORKDIR /app
 

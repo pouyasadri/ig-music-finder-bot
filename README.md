@@ -59,7 +59,7 @@ Run `make help` to list targets. Common ones:
 
 ## Local development
 
-Prerequisites: Go 1.23+, `ffmpeg` / `ffprobe`, `yt-dlp`, and (for Shazam) Python 3 with `shazamio`.
+Prerequisites: Go 1.27+, `ffmpeg` / `ffprobe`, `yt-dlp`, and (for Shazam) Python 3 with `shazamio`.
 
 1. Configure `.env` (see variables below).
 2. Optionally set up Instagram cookies: `make cookies`
