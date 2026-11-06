@@ -30,6 +30,7 @@ An open-access Telegram bot written in Go following Clean Architecture.
 │   └── config/
 ├── scripts/shazam_recognize.py
 ├── cookies.txt.example
+├── Makefile
 ├── Dockerfile
 ├── docker-compose.yml
 ├── go.mod
@@ -38,9 +39,47 @@ An open-access Telegram bot written in Go following Clean Architecture.
 
 Dependency rule: `cmd → app → adapter/storage → usecase → domain`.
 
+## Makefile
+
+Run `make help` to list targets. Common ones:
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Build `bin/bot` |
+| `make run` | Build and run locally (loads `.env` if present) |
+| `make test` | Run all unit tests |
+| `make test-race` | Run tests with the race detector |
+| `make fmt` / `make vet` | Format / static analysis |
+| `make tidy` | `go mod tidy` + verify |
+| `make cookies` | Create `cookies.txt` from the example if missing |
+| `make docker-up` | Build and start with Docker Compose |
+| `make docker-down` | Stop containers |
+| `make docker-logs` | Follow container logs |
+| `make clean` | Remove build artifacts |
+
+## Local development
+
+Prerequisites: Go 1.23+, `ffmpeg` / `ffprobe`, `yt-dlp`, and (for Shazam) Python 3 with `shazamio`.
+
+1. Configure `.env` (see variables below).
+2. Optionally set up Instagram cookies: `make cookies`
+3. Build and run:
+
+```bash
+make run
+```
+
+Or build only:
+
+```bash
+make build   # → bin/bot
+```
+
 ## Running Unit Tests
 
 ```bash
+make test
+# or
 go test ./...
 ```
 
@@ -83,12 +122,14 @@ go test ./...
 
 2. (Optional) Provide Instagram `cookies.txt` for authenticated downloads:
    ```bash
-   cp cookies.txt.example cookies.txt
+   make cookies
+   # or: cp cookies.txt.example cookies.txt
    ```
 
 3. Build and launch:
    ```bash
-   docker compose up -d --build
+   make docker-up
+   # or: docker compose up -d --build
    ```
 
 The bot persists its SQLite database in the `bot-data` Docker volume (cache, leases, rate limits, users/history/favorites). Temporary media lives on memory-backed `/tmp` and is removed after each request. Requests over the configured per-user rate limit or global queue limit are rejected with a retry message.
