@@ -8,6 +8,9 @@ import (
 	"telegram-audio-bot/internal/domain"
 )
 
+// SQLiteLeaseRepository stores request leases in SQLite.
+// It is safe for the bot's single-process deployment (Open caps the pool at one
+// writer). Expired rows are overwritten on Acquire; call DeleteExpired for cleanup.
 type SQLiteLeaseRepository struct{ db *sql.DB }
 
 func NewLeaseRepository(db *sql.DB) *SQLiteLeaseRepository { return &SQLiteLeaseRepository{db: db} }
@@ -44,4 +47,13 @@ func (r *SQLiteLeaseRepository) Renew(ctx context.Context, key, owner string, tt
 func (r *SQLiteLeaseRepository) Release(ctx context.Context, key, owner string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM request_leases WHERE key = ? AND owner = ?`, key, owner)
 	return err
+}
+
+// DeleteExpired removes leases whose TTL has elapsed.
+func (r *SQLiteLeaseRepository) DeleteExpired(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM request_leases WHERE expires_at <= ?`, time.Now().UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

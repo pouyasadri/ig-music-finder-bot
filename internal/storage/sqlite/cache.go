@@ -57,3 +57,12 @@ func (r *SQLiteCacheRepository) Delete(ctx context.Context, key string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM cache_entries WHERE key = ?`, key)
 	return err
 }
+
+// DeleteExpired removes cache rows past their expiry.
+func (r *SQLiteCacheRepository) DeleteExpired(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM cache_entries WHERE expires_at <= ?`, time.Now().UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
 // Open opens a SQLite database and applies the storage schema migrations.
 func Open(ctx context.Context, dsn string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", withSQLitePragmas(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -27,6 +28,22 @@ func Open(ctx context.Context, dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+// withSQLitePragmas attaches connection-scoped pragmas so every pooled connection
+// inherits busy_timeout and foreign_keys (Migrate alone only affects one conn).
+func withSQLitePragmas(dsn string) string {
+	if dsn == "" || dsn == ":memory:" {
+		return dsn
+	}
+	if !strings.Contains(dsn, "://") && !strings.HasPrefix(dsn, "file:") {
+		dsn = "file:" + dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 }
 
 // Migrate creates the tables used by the persistence repositories.
