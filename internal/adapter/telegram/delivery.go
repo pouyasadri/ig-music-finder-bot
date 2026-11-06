@@ -6,10 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
+	"telegram-audio-bot/internal/adapter/telegram/copy"
 	"telegram-audio-bot/internal/domain"
 
 	"github.com/go-telegram/bot"
@@ -74,7 +73,7 @@ func (d *Delivery) SendAudio(ctx context.Context, b *bot.Bot, chatID int64, stat
 	defer f.Close()
 
 	cleanFilename := audioFilename(payload)
-	caption := audioCaption(payload)
+	caption := copy.AudioCaption(payload)
 
 	sendParams := &bot.SendAudioParams{
 		ChatID:    chatID,
@@ -119,7 +118,7 @@ func (d *Delivery) SendAudio(ctx context.Context, b *bot.Bot, chatID int64, stat
 		}
 	}
 
-	if kb := buildDeliveryKeyboard(payload, sourceURL, channelID); kb != nil {
+	if kb := copy.DeliveryKeyboard(payload, sourceURL, channelID); kb != nil {
 		sendParams.ReplyMarkup = kb
 	}
 
@@ -174,9 +173,9 @@ func sendErrorMessage(ctx context.Context, b *bot.Bot, chatID int64, statusMsg *
 			MessageID: statusMsg.ID,
 		})
 	}
-	_, msgText := ErrorCategoryAndMessage(err)
+	_, msgText := copy.ErrorCategoryAndMessage(err)
 	if msgText == "" {
-		msgText = "⚠️ خطای موقت رخ داد. لطفاً دوباره تلاش کنید."
+		msgText = copy.GenericError
 	}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
@@ -201,49 +200,4 @@ func audioFilename(payload *domain.AudioPayload) string {
 		return fmt.Sprintf("%s.mp3", cleanTitle)
 	}
 	return fmt.Sprintf("%s - %s.mp3", cleanArtist, cleanTitle)
-}
-
-func audioCaption(payload *domain.AudioPayload) string {
-	if payload.IsFullTrack {
-		durationStr := ""
-		if payload.Duration > 0 {
-			durationStr = fmt.Sprintf("\n⏱ مدت زمان: %02d:%02d", payload.Duration/60, payload.Duration%60)
-		}
-		return fmt.Sprintf("🎵 نام اثر: %s\n👤 خواننده: %s%s", payload.Title, payload.Performer, durationStr)
-	}
-	return "🎶 صدای اصلی خود ریلز اینستاگرام\n(نسخه استودیویی در پایگاه داده پیدا نشد)"
-}
-
-func buildDeliveryKeyboard(payload *domain.AudioPayload, sourceURL, channelID string) *models.InlineKeyboardMarkup {
-	var rows [][]models.InlineKeyboardButton
-	var linkRow []models.InlineKeyboardButton
-
-	if payload.YouTubeURL != "" {
-		linkRow = append(linkRow, models.InlineKeyboardButton{Text: "📺 یوتیوب (YouTube)", URL: payload.YouTubeURL})
-	}
-	if payload.SoundCloudURL != "" {
-		linkRow = append(linkRow, models.InlineKeyboardButton{Text: "☁️ ساندکلاد", URL: payload.SoundCloudURL})
-	}
-	if sourceURL != "" && !strings.HasPrefix(sourceURL, "file://") && sourceURL != payload.SoundCloudURL {
-		linkRow = append(linkRow, models.InlineKeyboardButton{Text: "🔗 مشاهده پست", URL: sourceURL})
-	}
-	if len(linkRow) > 0 {
-		rows = append(rows, linkRow)
-	}
-	if payload.TrackID > 0 {
-		rows = append(rows, []models.InlineKeyboardButton{{
-			Text:         "❤️ ذخیره / حذف از ذخیره‌ها",
-			CallbackData: "favorite_track_" + strconv.FormatInt(payload.TrackID, 10),
-		}})
-	}
-	if channelID != "" {
-		rows = append(rows, []models.InlineKeyboardButton{{
-			Text:         "📣 ارسال به کانال",
-			CallbackData: "send_to_channel",
-		}})
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }

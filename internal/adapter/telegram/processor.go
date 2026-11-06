@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"telegram-audio-bot/internal/adapter/telegram/copy"
 	"telegram-audio-bot/internal/domain"
 	"telegram-audio-bot/internal/usecase"
 
@@ -45,7 +46,7 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    job.ChatID,
 			MessageID: job.StatusMsg.ID,
-			Text:      "شما در صف انتظار هستید. ربات در حال حاضر شلوغ است، لطفاً کمی صبر کنید... ⏳",
+			Text:      copy.WorkerQueued,
 		})
 	}
 
