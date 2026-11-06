@@ -49,12 +49,14 @@ go test ./...
 1. Copy and configure environment variables in `.env`:
    ```env
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-   # At least one recognizer is required (Shazam script path defaults on):
+   # At least one recognizer is required.
+   # Shazam defaults to /app/scripts/shazam_recognize.py when SHAZAM_SCRIPT_PATH is unset.
+   # Set SHAZAM_SCRIPT_PATH= (empty) to disable Shazam; then ACR and/or AudD are required.
    # ACR_HOST=identify-eu-west-1.acrcloud.com
    # ACR_KEY=your_acr_access_key
    # ACR_SECRET=your_acr_access_secret
    # AUDD_API_TOKEN=
-   SHAZAM_SCRIPT_PATH=/app/scripts/shazam_recognize.py
+   # SHAZAM_SCRIPT_PATH=/app/scripts/shazam_recognize.py
    # Optional
    CHANNEL_ID=
    COOKIES_PATH=/app/cookies.txt
@@ -77,7 +79,7 @@ go test ./...
    AUDD_HTTP_TIMEOUT=5s
    ```
 
-   Recognizers are wired only when configured. ACR credentials must be set as a complete trio when used. AudD and Shazam are optional add-ons.
+   Recognizers are wired only when configured. ACR credentials must be set as a complete trio when used. AudD is optional. Shazam is on by default in Docker; clear `SHAZAM_SCRIPT_PATH` to opt out.
 
 2. (Optional) Provide Instagram `cookies.txt` for authenticated downloads:
    ```bash

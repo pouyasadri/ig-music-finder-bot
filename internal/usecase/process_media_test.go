@@ -120,7 +120,7 @@ func TestProcessMediaRecognized(t *testing.T) {
 		}
 	})
 
-	t.Run("fallback: unrecognized sound returns raw reel audio", func(t *testing.T) {
+	t.Run("fallback: unrecognized sound returns original audio", func(t *testing.T) {
 		extractor := &mockExtractor{
 			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
 				return "/tmp/raw.mp3", "/tmp/snippet.mp3", nil
@@ -139,8 +139,36 @@ func TestProcessMediaRecognized(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected successful fallback, got: %v", err)
 		}
-		if res.IsFullTrack || res.FilePath != "/tmp/raw.mp3" {
+		if res.IsFullTrack || res.FilePath != "/tmp/raw.mp3" || res.Title != "Original Audio" || res.Performer != "Instagram" {
 			t.Errorf("expected raw fallback audio, got: %+v", res)
+		}
+	})
+
+	t.Run("upload: unrecognized media uses upload fallback labels", func(t *testing.T) {
+		extractor := &mockExtractor{
+			ExtractFunc: func(ctx context.Context, dir, url string) (string, string, error) {
+				if url != "file:///tmp/upload.mp4" {
+					t.Fatalf("unexpected url: %s", url)
+				}
+				return "/tmp/raw.mp3", "/tmp/snippet.mp3", nil
+			},
+		}
+		recognizer := &mockRecognizer{
+			IdentifyFunc: func(ctx context.Context, snippet string) (*domain.TrackMetadata, error) {
+				return nil, errors.New("no match")
+			},
+		}
+		uc := usecase.NewProcessMediaUseCaseFromRecognizers(extractor, recognizer, nil, &mockDownloader{}, nil)
+		res, err := uc.Execute(ctx, usecase.ProcessMediaInput{
+			Kind:      domain.SourceKindUpload,
+			SourceURL: "file:///tmp/upload.mp4",
+			WorkDir:   "/tmp/test",
+		}, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.IsFullTrack || res.Title != "Original Audio" || res.Performer != "Upload" {
+			t.Fatalf("unexpected payload: %+v", res)
 		}
 	})
 

@@ -15,16 +15,6 @@ type CacheEntry struct {
 	ExpiresAt time.Time
 }
 
-type Cache interface {
-	Get(ctx context.Context, key string) (CacheEntry, error)
-	Set(ctx context.Context, entry CacheEntry) error
-	Delete(ctx context.Context, key string) error
-}
-
-type CacheRepository interface {
-	Cache
-}
-
 type SQLiteCacheRepository struct{ db *sql.DB }
 
 func NewCacheRepository(db *sql.DB) *SQLiteCacheRepository { return &SQLiteCacheRepository{db: db} }

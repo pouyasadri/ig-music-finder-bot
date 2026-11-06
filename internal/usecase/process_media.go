@@ -65,7 +65,7 @@ func (uc *processMediaUseCase) Execute(ctx context.Context, in ProcessMediaInput
 	case domain.SourceKindSoundCloud:
 		return uc.executeSoundCloud(ctx, in.WorkDir, in.SourceURL, progress)
 	default:
-		return uc.executeRecognizedMedia(ctx, in.WorkDir, in.SourceURL, progress)
+		return uc.executeRecognizedMedia(ctx, in.WorkDir, in.SourceURL, kind, progress)
 	}
 }
 
@@ -115,7 +115,18 @@ func (uc *processMediaUseCase) executeSoundCloud(ctx context.Context, targetDir,
 	return payload, nil
 }
 
-func (uc *processMediaUseCase) executeRecognizedMedia(ctx context.Context, targetDir, mediaURL string, progress ProgressReporter) (*domain.AudioPayload, error) {
+func fallbackSourceLabels(kind domain.SourceKind) (title, performer string) {
+	switch kind {
+	case domain.SourceKindUpload:
+		return "Original Audio", "Upload"
+	case domain.SourceKindInstagram:
+		return "Original Audio", "Instagram"
+	default:
+		return "Original Audio", "Media"
+	}
+}
+
+func (uc *processMediaUseCase) executeRecognizedMedia(ctx context.Context, targetDir, mediaURL string, kind domain.SourceKind, progress ProgressReporter) (*domain.AudioPayload, error) {
 	reportProgress(progress, domain.ProgressExtracting, ProgressDetail{})
 
 	t0 := time.Now()
@@ -186,17 +197,17 @@ func (uc *processMediaUseCase) executeRecognizedMedia(ctx context.Context, targe
 		if err != nil && !errors.Is(err, domain.ErrDurationMismatch) {
 			err = fmt.Errorf("%w: %v", domain.ErrDownloadFailed, err)
 		}
-		slog.Warn("download failed, falling back to raw reel audio", "download_ms", downloadMs, "err", err)
+		slog.Warn("download failed, falling back to original audio", "download_ms", downloadMs, "err", err)
 	} else {
-		slog.Info("unrecognized sound, using raw reel audio", "extract_ms", extractMs, "recognize_ms", recognizeMs)
+		slog.Info("unrecognized sound, using original audio", "extract_ms", extractMs, "recognize_ms", recognizeMs)
 	}
 
 	reportProgress(progress, domain.ProgressSending, ProgressDetail{Fallback: true})
-
+	title, performer := fallbackSourceLabels(kind)
 	return &domain.AudioPayload{
 		OriginalPath: rawPath,
-		Title:        "Original Reel Audio",
-		Performer:    "Instagram",
+		Title:        title,
+		Performer:    performer,
 		FilePath:     rawPath,
 		IsFullTrack:  false,
 	}, nil

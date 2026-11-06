@@ -43,7 +43,7 @@ func Load() (Config, error) {
 		ACRKey:           os.Getenv("ACR_KEY"),
 		ACRSecret:        os.Getenv("ACR_SECRET"),
 		CookiesPath:      envOr("COOKIES_PATH", "/app/cookies.txt"),
-		ShazamScriptPath: envOr("SHAZAM_SCRIPT_PATH", "/app/scripts/shazam_recognize.py"),
+		ShazamScriptPath: shazamScriptPath(),
 		AuddToken:        os.Getenv("AUDD_API_TOKEN"),
 		ChannelID:        os.Getenv("CHANNEL_ID"),
 		WorkerCount:      5,
@@ -151,6 +151,14 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// shazamScriptPath defaults when unset; an explicitly empty SHAZAM_SCRIPT_PATH disables Shazam.
+func shazamScriptPath() string {
+	if value, ok := os.LookupEnv("SHAZAM_SCRIPT_PATH"); ok {
+		return value
+	}
+	return "/app/scripts/shazam_recognize.py"
 }
 
 func positiveInt(key string, fallback int) (int, error) {

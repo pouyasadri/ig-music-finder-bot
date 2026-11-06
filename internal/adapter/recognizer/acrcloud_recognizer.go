@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"telegram-audio-bot/internal/domain"
 
 	"github.com/acrcloud/acrcloud_sdk_golang/acrcloud"
@@ -46,6 +47,29 @@ func NewACRCloudRecognizer(host, key, secret string) domain.MusicRecognizer {
 }
 
 func (a *ACRCloudRecognizer) Identify(ctx context.Context, snippetPath string) (*domain.TrackMetadata, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	type outcome struct {
+		meta *domain.TrackMetadata
+		err  error
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		meta, err := a.identifySync(snippetPath)
+		ch <- outcome{meta: meta, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case out := <-ch:
+		return out.meta, out.err
+	}
+}
+
+func (a *ACRCloudRecognizer) identifySync(snippetPath string) (*domain.TrackMetadata, error) {
 	client := acrcloud.NewRecognizer(map[string]string{
 		"host":           a.host,
 		"access_key":     a.key,

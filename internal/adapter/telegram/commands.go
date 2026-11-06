@@ -59,6 +59,9 @@ func (c *Commands) Handle(ctx context.Context, b *bot.Bot, chatID, telegramID in
 }
 
 func (c *Commands) SendWelcome(ctx context.Context, b *bot.Bot, chatID int64) {
+	if b == nil {
+		return
+	}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        copy.Welcome,
@@ -127,6 +130,9 @@ func (c *Commands) SendSettings(ctx context.Context, b *bot.Bot, chatID, telegra
 		settings = &domain.UserSettings{UserID: user.ID, OutputMode: domain.OutputModeFull, KeepHistory: true}
 		_ = c.settings.Upsert(ctx, settings)
 	}
+	if b == nil {
+		return
+	}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        copy.SettingsPrompt,
@@ -150,5 +156,8 @@ func (c *Commands) ForgetUser(ctx context.Context, b *bot.Bot, chatID, telegramI
 }
 
 func sendText(ctx context.Context, b *bot.Bot, chatID int64, text string) {
+	if b == nil {
+		return
+	}
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: text})
 }

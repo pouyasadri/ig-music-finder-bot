@@ -36,6 +36,38 @@ func TestLoadAcceptsShazamOnly(t *testing.T) {
 	}
 }
 
+func TestLoadEmptyShazamDisablesDefault(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "token")
+	t.Setenv("SHAZAM_SCRIPT_PATH", "")
+	t.Setenv("AUDD_API_TOKEN", "audd")
+	t.Setenv("ACR_HOST", "")
+	t.Setenv("ACR_KEY", "")
+	t.Setenv("ACR_SECRET", "")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.HasShazam() {
+		t.Fatal("empty SHAZAM_SCRIPT_PATH should disable Shazam")
+	}
+	if !cfg.HasAudD() {
+		t.Fatal("expected AudD enabled")
+	}
+}
+
+func TestLoadRejectsNoRecognizersWhenShazamDisabled(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "token")
+	t.Setenv("SHAZAM_SCRIPT_PATH", "")
+	t.Setenv("AUDD_API_TOKEN", "")
+	t.Setenv("ACR_HOST", "")
+	t.Setenv("ACR_KEY", "")
+	t.Setenv("ACR_SECRET", "")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected error when no recognizers configured")
+	}
+}
+
 func TestLoadRejectsPartialACR(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "token")
 	t.Setenv("SHAZAM_SCRIPT_PATH", "/tmp/shazam.py")

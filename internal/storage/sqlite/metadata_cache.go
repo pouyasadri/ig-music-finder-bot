@@ -8,10 +8,10 @@ import (
 )
 
 type MetadataCacheAdapter struct {
-	cache Cache
+	cache *SQLiteCacheRepository
 }
 
-func NewMetadataCacheAdapter(cache Cache) *MetadataCacheAdapter {
+func NewMetadataCacheAdapter(cache *SQLiteCacheRepository) *MetadataCacheAdapter {
 	return &MetadataCacheAdapter{cache: cache}
 }
 

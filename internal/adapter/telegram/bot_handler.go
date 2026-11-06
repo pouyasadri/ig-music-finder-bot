@@ -2,10 +2,8 @@ package telegram
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 	"time"
 
@@ -17,71 +15,48 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-var (
-	igURLRegex         = regexp.MustCompile(`https?://(?:www\.)?(?:instagram\.com|instagr\.am)/(?:reel|p|share/reel)/[a-zA-Z0-9_\-\.]+/?(?:\?[^\s]*)?`)
-	soundCloudURLRegex = regexp.MustCompile(`https?://(?:www\.|m\.)?(?:soundcloud\.com|on\.soundcloud\.com|soundcloud\.app\.goo\.gl)/[^\s]+`)
-	sanitizeFilename   = regexp.MustCompile(`[<>:"/\\|?*]`)
-)
-
+// BotHandler is the thin Telegram facade: start loop, route commands/callbacks, admit media jobs.
 type BotHandler struct {
-	token          string
-	mediaUC        usecase.ProcessMediaUseCase
-	admission      *Admission
-	workers        *WorkerPool
-	delivery       *Delivery
-	commands       *Commands
-	callbacks      *Callbacks
-	router         *CallbackRouter
-	channelID      string
-	maxUploadBytes int64
-	users          domain.UserRepository
-	settings       domain.SettingsRepository
-	requests       domain.RequestRepository
-	tracks         domain.TrackRepository
-	favorites      domain.FavoriteRepository
+	token string
+	deps  Deps
 }
 
 func NewBotHandler(token string, uc usecase.ProcessMediaUseCase, maxWorkers int, channelID string) *BotHandler {
 	h := &BotHandler{
-		token:          token,
-		mediaUC:        uc,
-		workers:        NewWorkerPool(maxWorkers, 0),
-		channelID:      channelID,
-		maxUploadBytes: defaultMaxUploadBytes,
-		router:         NewCallbackRouter(),
+		token: token,
+		deps: Deps{
+			MediaUC:        uc,
+			ChannelID:      channelID,
+			MaxUploadBytes: defaultMaxUploadBytes,
+			Infra:          Infra{Workers: NewWorkerPool(maxWorkers, 0)},
+			Presentation:   Presentation{Router: NewCallbackRouter()},
+		},
 	}
-	h.delivery = NewDelivery(channelID, nil, nil, nil, h.maxUploadBytes)
+	h.deps.Infra.Delivery = NewDelivery(channelID, nil, nil, nil, h.deps.MaxUploadBytes)
 	h.rebuildPresentation()
 	return h
 }
 
 func NewProtectedBotHandler(token string, uc usecase.ProcessMediaUseCase, maxWorkers, queueLimit int, channelID string, rateLimiter domain.RateLimiter, leases domain.Lease, rateLimit int, rateWindow, leaseTTL, requestTTL time.Duration) *BotHandler {
 	h := NewBotHandler(token, uc, maxWorkers, channelID)
-	h.workers = NewWorkerPool(maxWorkers, requestTTL)
-	h.admission = NewAdmission(rateLimiter, leases, maxWorkers, queueLimit, rateLimit, rateWindow, leaseTTL)
+	h.deps.Infra.Workers = NewWorkerPool(maxWorkers, requestTTL)
+	h.deps.Infra.Admission = NewAdmission(rateLimiter, leases, maxWorkers, queueLimit, rateLimit, rateWindow, leaseTTL)
 	return h
 }
 
 func (h *BotHandler) WithMaxUploadBytes(n int64) *BotHandler {
 	if n > 0 {
-		h.maxUploadBytes = n
+		h.deps.MaxUploadBytes = n
 	}
-	h.delivery = NewDelivery(h.channelID, h.tracks, h.requests, h.settings, h.maxUploadBytes)
+	h.rebuildDelivery()
 	return h
 }
 
 func (h *BotHandler) WithRepositories(users domain.UserRepository, settings domain.SettingsRepository, requests domain.RequestRepository, tracks domain.TrackRepository, favorites domain.FavoriteRepository) *BotHandler {
-	h.users, h.settings, h.requests, h.tracks, h.favorites = users, settings, requests, tracks, favorites
-	h.delivery = NewDelivery(h.channelID, tracks, requests, settings, h.maxUploadBytes)
+	h.deps.Repos = Repos{Users: users, Settings: settings, Requests: requests, Tracks: tracks, Favorites: favorites}
+	h.rebuildDelivery()
 	h.rebuildPresentation()
 	return h
-}
-
-func (h *BotHandler) rebuildPresentation() {
-	h.commands = NewCommands(h.users, h.settings, h.requests, h.favorites, h.ensureUser)
-	h.callbacks = NewCallbacks(h.users, h.settings, h.favorites, h.channelID, h.ensureUser)
-	h.router = NewCallbackRouter()
-	h.callbacks.Register(h.router)
 }
 
 func (h *BotHandler) Start(ctx context.Context) error {
@@ -93,14 +68,13 @@ func (h *BotHandler) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create bot: %w", err)
 	}
-
 	slog.Info("Telegram Bot started listening for messages")
 	b.Start(ctx)
 	return nil
 }
 
 func (h *BotHandler) handleCallback(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if err := h.router.Handle(ctx, b, update); err != nil {
+	if err := h.deps.Presentation.Router.Handle(ctx, b, update); err != nil {
 		slog.Warn("callback handler failed", "err", err)
 	}
 }
@@ -109,102 +83,30 @@ func (h *BotHandler) handleMessage(ctx context.Context, b *bot.Bot, update *mode
 	if update.Message == nil {
 		return
 	}
-
+	chatID, userID := update.Message.Chat.ID, update.Message.From.ID
 	text := strings.TrimSpace(update.Message.Text)
-	chatID := update.Message.Chat.ID
-	userID := update.Message.From.ID
-
-	if h.commands != nil && h.commands.Handle(ctx, b, chatID, userID, text) {
+	if h.deps.Presentation.Commands != nil && h.deps.Presentation.Commands.Handle(ctx, b, chatID, userID, text) {
 		return
 	}
-
-	igMatch := igURLRegex.FindString(text)
-	scMatch := soundCloudURLRegex.FindString(text)
-	mediaID, mediaUniqueID := telegramMediaIDs(update.Message)
-	if igMatch == "" && scMatch == "" && mediaID == "" {
+	classified, ok := classifyIncoming(text, update.Message)
+	if !ok {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: copy.InvalidInput})
 		return
 	}
-
-	sourceKind := domain.SourceKindInstagram
-	sourceURL := igMatch
-	if sourceURL == "" && scMatch != "" {
-		sourceKind = domain.SourceKindSoundCloud
-		sourceURL = scMatch
-	}
-	if sourceURL == "" {
-		sourceKind = domain.SourceKindUpload
-		sourceURL = "file://" + mediaUniqueID
-	}
-	normalizedURL := domain.NormalizeMediaURL(sourceURL)
-
-	permit, err := h.admission.TryAdmit(ctx, userID, normalizedURL)
-	if err != nil {
-		h.replyAdmissionError(ctx, b, chatID, userID, err)
-		return
-	}
-
-	var request *domain.Request
-	if h.users != nil && h.requests != nil {
-		storedUser := h.ensureUser(ctx, update.Message.From)
-		if storedUser != nil {
-			request = &domain.Request{UserID: storedUser.ID, URL: normalizedURL, Status: domain.RequestStatusProcessing}
-			if err := h.requests.Create(ctx, request); err != nil {
-				slog.Warn("failed to persist request", "err", err)
-				request = nil
-			}
+	normalizedURL := normalizeSourceURL(classified.SourceURL)
+	var permit *AdmissionPermit
+	if h.deps.Infra.Admission != nil {
+		var err error
+		if permit, err = h.deps.Infra.Admission.TryAdmit(ctx, userID, normalizedURL); err != nil {
+			h.replyAdmissionError(ctx, b, chatID, userID, err)
+			return
 		}
 	}
-
-	slog.Info("processing new media request",
-		"chat_id", chatID,
-		"user_id", userID,
-		"source_kind", sourceKind,
-		"url", sourceURL,
-	)
-
-	statusMsg, _ := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID,
-		Text:   copy.StatusReceived(sourceKind),
-	})
-
+	request := h.createRequest(ctx, update.Message.From, normalizedURL)
+	slog.Info("processing new media request", "chat_id", chatID, "user_id", userID, "source_kind", classified.Kind, "url", classified.SourceURL)
+	statusMsg, _ := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: copy.StatusReceived(classified.Kind)})
 	h.submitMediaJob(ctx, b, mediaJob{
-		ChatID:        chatID,
-		UserID:        userID,
-		SourceKind:    sourceKind,
-		SourceURL:     sourceURL,
-		MediaID:       mediaID,
-		MediaUniqueID: mediaUniqueID,
-		StatusMsg:     statusMsg,
-		Request:       request,
-		Permit:        permit,
+		ChatID: chatID, UserID: userID, SourceKind: classified.Kind, SourceURL: classified.SourceURL,
+		MediaID: classified.MediaID, MediaUniqueID: classified.MediaUniqueID, StatusMsg: statusMsg, Request: request, Permit: permit,
 	})
-}
-
-func (h *BotHandler) replyAdmissionError(ctx context.Context, b *bot.Bot, chatID, userID int64, err error) {
-	switch {
-	case errors.Is(err, domain.ErrRateLimited), errors.Is(err, domain.ErrLeaseHeld), errors.Is(err, domain.ErrQueueFull):
-		_, msg := copy.ErrorCategoryAndMessage(err)
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: msg})
-	default:
-		slog.Error("admission failed", "user_id", userID, "err", err)
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: copy.AdmissionFailed})
-	}
-}
-
-func (h *BotHandler) ensureUser(ctx context.Context, user *models.User) *domain.User {
-	if user == nil || h.users == nil {
-		return nil
-	}
-	stored, err := h.users.GetByTelegramID(ctx, user.ID)
-	if err == nil {
-		stored.Username, stored.FirstName, stored.LastName = user.Username, user.FirstName, user.LastName
-		_ = h.users.Update(ctx, stored)
-		return stored
-	}
-	stored = &domain.User{TelegramID: user.ID, Username: user.Username, FirstName: user.FirstName, LastName: user.LastName}
-	if err := h.users.Create(ctx, stored); err != nil {
-		return nil
-	}
-	return stored
 }

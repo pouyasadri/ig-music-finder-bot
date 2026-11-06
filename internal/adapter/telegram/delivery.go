@@ -48,8 +48,8 @@ func (d *Delivery) ApplyOutputMode(ctx context.Context, request *domain.Request,
 		return
 	}
 	payload.FilePath = payload.OriginalPath
-	payload.Title = "Original Reel Audio"
-	payload.Performer = "Instagram"
+	payload.Title = "Original Audio"
+	payload.Performer = "Source"
 	payload.IsFullTrack = false
 	payload.ThumbnailPath = ""
 	payload.Duration = 0

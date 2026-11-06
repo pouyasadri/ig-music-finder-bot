@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"telegram-audio-bot/internal/adapter/downloader"
 	"telegram-audio-bot/internal/adapter/extractor"
@@ -19,11 +20,15 @@ import (
 	"telegram-audio-bot/internal/usecase"
 )
 
+const janitorInterval = 5 * time.Minute
+
 // App is the composition root for the Telegram music bot.
 type App struct {
-	cfg config.Config
-	db  *sql.DB
-	bot *telegram.BotHandler
+	cfg    config.Config
+	db     *sql.DB
+	bot    *telegram.BotHandler
+	cache  *sqlite.SQLiteCacheRepository
+	leases *sqlite.SQLiteLeaseRepository
 }
 
 // New opens storage, wires adapters/use cases, and returns a runnable App.
@@ -37,7 +42,9 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 
-	botHandler, err := buildBot(cfg, db)
+	cache := sqlite.NewCacheRepository(db)
+	leases := sqlite.NewLeaseRepository(db)
+	botHandler, err := buildBot(cfg, db, cache, leases)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -50,14 +57,15 @@ func New(cfg config.Config) (*App, error) {
 		"recognizers", configuredRecognizers(cfg),
 	)
 
-	return &App{cfg: cfg, db: db, bot: botHandler}, nil
+	return &App{cfg: cfg, db: db, bot: botHandler, cache: cache, leases: leases}, nil
 }
 
-// Start begins the Telegram long-poll loop until ctx is cancelled.
+// Start begins background cleanup and the Telegram long-poll loop until ctx is cancelled.
 func (a *App) Start(ctx context.Context) error {
 	if a == nil || a.bot == nil {
 		return fmt.Errorf("app is not initialized")
 	}
+	go a.runJanitor(ctx)
 	return a.bot.Start(ctx)
 }
 
@@ -69,7 +77,38 @@ func (a *App) Close() error {
 	return a.db.Close()
 }
 
-func buildBot(cfg config.Config, db *sql.DB) (*telegram.BotHandler, error) {
+func (a *App) runJanitor(ctx context.Context) {
+	ticker := time.NewTicker(janitorInterval)
+	defer ticker.Stop()
+	a.purgeExpired(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.purgeExpired(ctx)
+		}
+	}
+}
+
+func (a *App) purgeExpired(ctx context.Context) {
+	if a.leases != nil {
+		if n, err := a.leases.DeleteExpired(ctx); err != nil {
+			slog.Warn("lease cleanup failed", "err", err)
+		} else if n > 0 {
+			slog.Info("expired leases deleted", "count", n)
+		}
+	}
+	if a.cache != nil {
+		if n, err := a.cache.DeleteExpired(ctx); err != nil {
+			slog.Warn("cache cleanup failed", "err", err)
+		} else if n > 0 {
+			slog.Info("expired cache entries deleted", "count", n)
+		}
+	}
+}
+
+func buildBot(cfg config.Config, db *sql.DB, cache *sqlite.SQLiteCacheRepository, leases *sqlite.SQLiteLeaseRepository) (*telegram.BotHandler, error) {
 	mediaExtractor := extractor.NewYtDlpExtractor(cfg.CookiesPath, cfg.ExtractTimeout)
 
 	engines := make([]fallback.Engine, 0, 3)
@@ -109,10 +148,9 @@ func buildBot(cfg config.Config, db *sql.DB) (*telegram.BotHandler, error) {
 		downloader.NamedDownloader{Name: "YouTube", Downloader: youTubeDownloader},
 	)
 
-	metadataCache := sqlite.NewMetadataCacheAdapter(sqlite.NewCacheRepository(db))
 	metadataResolver := usecase.NewCachedTrackMetadataResolver(
 		usecase.NewTrackMetadataResolver(compositeRecognizer, platformRecognizer, cfg.RecognizeScrapeTimeout),
-		metadataCache,
+		sqlite.NewMetadataCacheAdapter(cache),
 		cfg.CacheTTL,
 	)
 	processMediaUC := usecase.NewProcessMediaUseCase(mediaExtractor, metadataResolver, musicDownloader, soundCloudDownloader)
@@ -124,7 +162,7 @@ func buildBot(cfg config.Config, db *sql.DB) (*telegram.BotHandler, error) {
 		cfg.QueueLimit,
 		cfg.ChannelID,
 		sqlite.NewRateLimitRepository(db),
-		sqlite.NewLeaseRepository(db),
+		leases,
 		cfg.RateLimit,
 		cfg.RateWindow,
 		cfg.LeaseTTL,

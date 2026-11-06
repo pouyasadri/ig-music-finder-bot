@@ -52,6 +52,9 @@ func (r *CallbackRouter) Handle(ctx context.Context, b *bot.Bot, update *models.
 }
 
 func SafeAnswerCallback(ctx context.Context, b *bot.Bot, callbackID, text string, isAlert bool) {
+	if b == nil {
+		return
+	}
 	_, err := b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: callbackID,
 		Text:            text,

@@ -38,11 +38,14 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 		defer job.Permit.Release()
 	}
 
-	workCtx, cancel := h.workers.WithTimeout(ctx)
+	workers := h.deps.Infra.Workers
+	delivery := h.deps.Infra.Delivery
+
+	workCtx, cancel := workers.WithTimeout(ctx)
 	defer cancel()
 	startTime := time.Now()
 
-	if h.workers != nil && h.workers.Busy() {
+	if workers != nil && workers.Busy() {
 		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    job.ChatID,
 			MessageID: job.StatusMsg.ID,
@@ -50,13 +53,13 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 		})
 	}
 
-	releaseWorker := h.workers.Acquire()
+	releaseWorker := workers.Acquire()
 	defer releaseWorker()
 
 	workDir := filepath.Join(getTempBaseDir(), fmt.Sprintf("bot_req_%d", time.Now().UnixNano()))
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		slog.Error("failed to create workdir", "err", err, "dir", workDir)
-		h.delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
+		delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
 		return
 	}
 	defer os.RemoveAll(workDir)
@@ -65,7 +68,7 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 	if job.MediaID != "" {
 		mediaPath, downloadErr := downloadTelegramMedia(ctx, b, job.MediaID, job.MediaUniqueID, workDir)
 		if downloadErr != nil {
-			h.delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, downloadErr)
+			delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, downloadErr)
 			return
 		}
 		sourceURL = "file://" + mediaPath
@@ -83,32 +86,33 @@ func (h *BotHandler) runMediaJob(ctx context.Context, b *bot.Bot, job mediaJob) 
 		})
 	})
 
-	payload, err := h.mediaUC.Execute(workCtx, usecase.ProcessMediaInput{
+	payload, err := h.deps.MediaUC.Execute(workCtx, usecase.ProcessMediaInput{
 		Kind:      job.SourceKind,
 		SourceURL: sourceURL,
 		WorkDir:   workDir,
 	}, progress)
 	if err != nil {
 		slog.Error("failed to process media", "chat_id", job.ChatID, "err", err, "url", sourceURL, "source_kind", job.SourceKind)
-		h.delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
+		delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
 		return
 	}
 
-	h.delivery.ApplyOutputMode(ctx, job.Request, payload)
+	delivery.ApplyOutputMode(ctx, job.Request, payload)
 
-	result, err := h.delivery.SendAudio(ctx, b, job.ChatID, job.StatusMsg, payload, sourceURL, job.Request)
+	result, err := delivery.SendAudio(ctx, b, job.ChatID, job.StatusMsg, payload, sourceURL, job.Request)
 	if err != nil {
 		if errors.Is(err, domain.ErrFileTooLarge) {
 			slog.Warn("audio file exceeds 50MB limit")
 		} else {
 			slog.Error("failed to send audio file to user", "chat_id", job.ChatID, "err", err)
 		}
-		h.delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
+		delivery.Fail(ctx, b, job.ChatID, job.StatusMsg, job.Request, err)
 		return
 	}
 
-	slog.Info("reel audio processed and delivered successfully",
+	slog.Info("media processed and delivered successfully",
 		"chat_id", job.ChatID,
+		"source_kind", job.SourceKind,
 		"is_full_track", payload.IsFullTrack,
 		"title", payload.Title,
 		"clean_filename", result.Filename,
